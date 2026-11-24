@@ -5,9 +5,20 @@ on:
   push:
     branches: [main]
 
+# The job only reads the repo; it never needs to write.
+permissions:
+  contents: read
+
+# A new push to the same PR cancels its stale run. On main a running job is not cancelled;
+# a newer push waits for it (and replaces any run already waiting).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
