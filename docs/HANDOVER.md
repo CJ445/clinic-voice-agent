@@ -20,7 +20,8 @@ then checked by Cyril. The next session starts by reading the top entry.
   - **Red on purpose:** run 45372931560 (PR #2, `throwaway/ci-red-test` @ `46de256`): ruff and
     pyright passed, pytest `1 failed, 5 passed`, job failed at the test step:
     https://github.com/CJ445/clinic-voice-agent/actions/runs/45372931560
-    Cyril took a screenshot of the merge being blocked after marking it ready for review. PR #2 was closed without merging and its branch was deleted.
+    Cyril took a screenshot of the merge being blocked after marking it ready for review.
+    PR #2 was closed without merging and its branch was deleted.
 - **In progress (exact state):** PR #3 is a draft; still needs `/review`, then Cyril merges.
 - **Next step (first command to run):** `/task M0.3`
 - **Open questions for Cyril:** where to keep the blocked-merge screenshot (e.g. `docs/evidence/`)
@@ -30,7 +31,8 @@ then checked by Cyril. The next session starts by reading the top entry.
 - **M6 prerequisite (self-hosted GPU runner, public repo):** the `gpu` runner must never run
   fork PRs. Trigger GPU jobs only on own-branch PRs, push to `main`, or `workflow_dispatch`;
   require approval for workflows from outside contributors; pin every action to a commit SHA
-  at that point (version tags are fine until then — Q3 of M0.2).
+  at that point (until then Cyril chose to keep version tags). When enabling the commented-out
+  `eval-gate` job in `ci.yml`, change its `uv sync` to `uv sync --locked` to match `check`.
 - **Decisions made this session:** ruleset settings above; keep action version tags until M6
   (Cyril; no ADR).
 - **Things that broke:** none.
