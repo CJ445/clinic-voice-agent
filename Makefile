@@ -1,7 +1,7 @@
 .PHONY: setup lint format types test check eval-text eval-audio bench gate
 
 setup:
-	uv sync --locked
+	uv sync --locked --group gpu  # plain `uv sync` would uninstall the gpu group
 	@command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv || echo "no GPU visible"
 
 lint:

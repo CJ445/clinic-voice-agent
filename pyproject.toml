@@ -7,6 +7,10 @@ dependencies = []
 
 [dependency-groups]
 dev = ["ruff>=0.6", "pyright>=1.1.380", "pytest>=8"]
+gpu = [
+    "faster-whisper>=1.2.1",
+    "vllm==0.19.1",
+]
 
 [tool.uv]
 package = false
