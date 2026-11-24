@@ -9,11 +9,15 @@ dependencies = []
 dev = ["ruff>=0.6", "pyright>=1.1.380", "pytest>=8"]
 gpu = [
     "faster-whisper>=1.2.1",
+    "pocket-tts",
     "vllm==0.19.1",
 ]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+pocket-tts = { git = "https://github.com/kyutai-labs/pocket-tts", rev = "0c2db3b" }
 
 [tool.ruff]
 line-length = 100
