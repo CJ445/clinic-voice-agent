@@ -5,6 +5,39 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ---
 
+## 2026-11-24 — session 1, part 2 (M0.2)
+
+- **Milestone / task:** M0.2 (branch `m0/ci-check`, PR #3)
+- **Done:**
+  - PR #1 (M0.1) merged as `a4eae64`.
+  - `main` ruleset `27975112` active: PR required (0 approvals) + `check` status, not strict;
+    no bypass actors, so direct pushes to `main` are rejected.
+  - `2a85ab5` ci: `permissions: contents: read`, `concurrency` (cancel stale PR runs),
+    `timeout-minutes: 10`.
+  - **Green on a PR:** run 45373444158 (PR #3, hardened workflow, CPython 3.11.18, 5 passed):
+    https://github.com/CJ445/clinic-voice-agent/actions/runs/45373444158
+    (also run 45367970564 on PR #1, pre-hardening).
+  - **Red on purpose:** run 45372931560 (PR #2, `throwaway/ci-red-test` @ `46de256`): ruff and
+    pyright passed, pytest `1 failed, 5 passed`, job failed at the test step:
+    https://github.com/CJ445/clinic-voice-agent/actions/runs/45372931560
+    Cyril took a screenshot of the merge being blocked after marking it ready for review.
+    PR #2 was closed without merging and its branch was deleted.
+- **In progress (exact state):** PR #3 is a draft; still needs `/review`, then Cyril merges.
+- **Next step (first command to run):** `/task M0.3`
+- **Open questions for Cyril:** where to keep the blocked-merge screenshot (e.g. `docs/evidence/`)
+  so it can be linked from here and the README.
+- **Not proven by these runs:** `concurrency` cancelling and `timeout-minutes` never fired; the
+  red run used `main`'s pre-hardening workflow (it proves the gate, not the hardening).
+- **M6 prerequisite (self-hosted GPU runner, public repo):** the `gpu` runner must never run
+  fork PRs. Trigger GPU jobs only on own-branch PRs, push to `main`, or `workflow_dispatch`;
+  require approval for workflows from outside contributors; pin every action to a commit SHA
+  at that point (until then Cyril chose to keep version tags). When enabling the commented-out
+  `eval-gate` job in `ci.yml`, change its `uv sync` to `uv sync --locked` to match `check`.
+- **Decisions made this session:** ruleset settings above; keep action version tags until M6
+  (Cyril; no ADR).
+- **Things that broke:** none.
+- **Gate status:** `make check` ✅ (5 passed); CI `check` ✅ on PR #3; eval vs baseline: n/a
+
 ## 2026-11-24 — session 1
 
 - **Milestone / task:** M0.1 (done; branch `m0/project-tooling`, not pushed)
