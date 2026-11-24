@@ -18,7 +18,7 @@ review record). Tag each finished milestone: `git tag m3-done`.
 ## M0 — Foundations (day 1)
 
 - [x] M0.1 `uv init`, pyproject with ruff/pyright/pytest, Makefile targets wired, `.gitignore`
-- [ ] M0.2 GitHub Actions: `make check` on ubuntu-latest (CPU only)
+- [x] M0.2 GitHub Actions: `make check` on ubuntu-latest (CPU only)
 - [ ] M0.3 **GPU co-residency smoke test**: vLLM + STT + TTS loaded together, one round trip.
       Script `bench/vram.py` writes `results/vram.json` (per-model MiB, headroom).
 - [ ] M0.4 Fill `docs/DESIGN.md` §1–3 yourself (problem, constraints, architecture sketch)
