@@ -15,4 +15,4 @@ in `docs/decisions/`, reviewed every diff, and own every line.
 
 | Module / PR | Drafted by | Verified how | Rewritten? | Notes |
 |---|---|---|---|---|
-| | | | | |
+| M0.1 (`m0/project-tooling`) — Python 3.11 pin, `uv sync --locked`, package roots, `tests/test_packages.py` | Claude | Cyril: plan approved with edits; reviewer subagent (0 must-fix); `/explain` 5/5 answered | No | **Verified.** Weak spots in `/explain`: test is a *guard*, not what creates the paths; `pythonpath = ["."]` + `package = false` is why imports resolve; `requires-python` controls lock resolution, not just the interpreter. Known gap: docstring test covers package roots only (ruff `D100`/`D104` would cover all modules — undecided). |

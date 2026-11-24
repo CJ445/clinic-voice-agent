@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync
+      - run: uv sync --locked
       - run: make check
 
   # Enabled in M6: runs on your RTX 4060 registered as a self-hosted runner with label `gpu`.
