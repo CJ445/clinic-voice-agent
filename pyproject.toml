@@ -2,7 +2,7 @@
 name = "clinic-voice-agent"
 version = "0.1.0"
 description = "Hindi/English clinic-booking voice agent with a caller simulator that gates regressions in CI"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.12"
 dependencies = []
 
 [dependency-groups]
