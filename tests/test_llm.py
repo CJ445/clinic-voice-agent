@@ -111,6 +111,46 @@ def test_split_tool_call_deltas_are_joined() -> None:
     assert reply.finish_reason == "tool_calls"
 
 
+def test_length_finish_returns_the_text_so_far() -> None:
+    # Cyril, review #1: earlier sentences are already spoken when "length" arrives, so the text
+    # is returned (M3.2 drops the unfinished tail) and the transport does not retry.
+    server = FakeServer([*TEXT[:3], sse({}, "length"), DONE], TEXT)
+    reply = ask(server)
+    assert isinstance(reply, llm.LLMReply)
+    assert (reply.text, reply.finish_reason, reply.tool_calls) == ("नमस्ते जी", "length", ())
+    assert reply.truncated_tool_call is False and len(server.requests) == 1
+
+
+def test_length_finish_mid_tool_call_drops_the_call() -> None:
+    call = {"index": 0, "id": "call_1", "type": "function"}
+    cut_off = [
+        ROLE,
+        sse(
+            {
+                "tool_calls": [
+                    {**call, "function": {"name": "book", "arguments": '{"slot_id": "d1-'}}
+                ]
+            }
+        ),
+        sse({}, "length"),
+        DONE,
+    ]
+    server = FakeServer(cut_off, TEXT)
+    reply = ask(server, tools=[{"type": "function", "function": {"name": "book"}}])
+    assert isinstance(reply, llm.LLMReply)
+    assert (reply.finish_reason, reply.tool_calls, reply.truncated_tool_call) == (
+        "length",
+        (),
+        True,
+    )
+    assert len(server.requests) == 1
+
+
+def test_complete_tool_call_is_not_marked_truncated() -> None:
+    reply = ask(FakeServer(TEXT))
+    assert isinstance(reply, llm.LLMReply) and reply.truncated_tool_call is False
+
+
 def test_request_is_greedy_streamed_and_capped() -> None:
     server = FakeServer(TEXT)
     tools = [{"type": "function", "function": {"name": "check_slots"}}]

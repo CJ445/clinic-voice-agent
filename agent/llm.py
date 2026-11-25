@@ -9,7 +9,11 @@ quickly; the caller side then plays a fallback line. Rules (Cyril, M3.1):
   half-heard reply is never repeated. The SDK's own retries are off (max_retries=0).
 - A cancellation (barge-in) propagates as CancelledError and closes the stream. It is never turned
   into LLMUnavailable (CLAUDE.md rule 7).
-Tool-call deltas are joined by the SDK's ChatCompletionStreamState, not by code here.
+- finish_reason "length" (MAX_TOKENS reached) is an LLMReply with the text so far: in streaming,
+  earlier sentences are already spoken. A tool call in it may be cut off, so it is dropped and
+  truncated_tool_call is set; it is never executed. No transport retry (Cyril, review #1).
+Tool-call deltas are joined by the SDK's ChatCompletionStreamState, not by code here. Its
+get_final_completion() raises on "length", so the reply is read from its snapshot instead.
 """
 
 import asyncio
@@ -52,6 +56,7 @@ class LLMReply:
     first_chunk_ns: int | None  # perf_counter_ns of the first chunk of any kind (diagnostic)
     first_token_ns: int | None  # perf_counter_ns of llm_first_token (ADR-0005)
     attempts: int
+    truncated_tool_call: bool  # finish "length" cut a tool call off; it was dropped
 
 
 @dataclass(frozen=True)
@@ -168,11 +173,20 @@ async def _attempt(
     if finish_reason is None:
         got_token = first_token_ns is not None
         raise _Failed("dropped", "stream ended without a finish reason", got_token=got_token)
-    message = state.get_final_completion().choices[0].message
+    message = state.current_completion_snapshot.choices[0].message
     calls = tuple(
         ToolCall(call.id, call.function.name, call.function.arguments)
         for call in message.tool_calls or []
     )
+    truncated = finish_reason == "length" and bool(calls)
+    if finish_reason == "length":
+        calls = ()  # its arguments may be cut off: never executed
     return LLMReply(
-        message.content or "", calls, finish_reason, first_chunk_ns, first_token_ns, attempt
+        text=message.content or "",
+        tool_calls=calls,
+        finish_reason=finish_reason,
+        first_chunk_ns=first_chunk_ns,
+        first_token_ns=first_token_ns,
+        attempts=attempt,
+        truncated_tool_call=truncated,
     )
