@@ -20,7 +20,7 @@ package = false
 python-preference = "only-managed"
 
 [tool.uv.sources]
-pocket-tts = { git = "https://github.com/kyutai-labs/pocket-tts", rev = "0c2db3b" }
+pocket-tts = { git = "https://github.com/kyutai-labs/pocket-tts", rev = "0c2db3bdea7c991c568989cc11b503f14483fabc" }
 
 [tool.ruff]
 line-length = 100

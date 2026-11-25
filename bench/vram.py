@@ -35,10 +35,10 @@ from bench.gpu_mem import (
 )
 
 STT_REPO = "Systran/faster-whisper-large-v3"
-STT_REVISION = "edaa852ec7"
+STT_REVISION = "edaa852ec7e145841d8ffdb056a99866b5f0a478"
 STT_COMPUTE = "int8_float16"
 TTS_REPO = "Indus-Labs/indus-pocket-tts"
-TTS_REVISION = "39899d3c1d"
+TTS_REVISION = "39899d3c1dcda47a7ef167cd222419feb86abeb9"
 TTS_RATE = 24000
 PROMPT_HI = "नमस्ते, मुझे कल शाम डॉक्टर शर्मा के साथ अपॉइंटमेंट चाहिए।"
 SYSTEM = "You are a clinic receptionist. Reply in one short Hindi sentence, in Devanagari script."

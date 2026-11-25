@@ -331,7 +331,7 @@ dev = [
 ]
 gpu = [
     { name = "faster-whisper", specifier = ">=1.2.1" },
-    { name = "pocket-tts", git = "https://github.com/kyutai-labs/pocket-tts?rev=0c2db3b" },
+    { name = "pocket-tts", git = "https://github.com/kyutai-labs/pocket-tts?rev=0c2db3bdea7c991c568989cc11b503f14483fabc" },
     { name = "vllm", specifier = "==0.19.1" },
 ]
 
@@ -1880,7 +1880,7 @@ wheels = [
 [[package]]
 name = "pocket-tts"
 version = "3.1.0"
-source = { git = "https://github.com/kyutai-labs/pocket-tts?rev=0c2db3b#0c2db3bdea7c991c568989cc11b503f14483fabc" }
+source = { git = "https://github.com/kyutai-labs/pocket-tts?rev=0c2db3bdea7c991c568989cc11b503f14483fabc#0c2db3bdea7c991c568989cc11b503f14483fabc" }
 dependencies = [
     { name = "einops" },
     { name = "fastapi" },
