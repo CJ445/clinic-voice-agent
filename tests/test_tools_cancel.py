@@ -89,3 +89,33 @@ def test_cannot_cancel_an_appointment_that_has_started(conn: sqlite3.Connection)
 def test_input_must_be_id_or_phone_plus_slot(fields: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         CancelIn.model_validate(fields)
+
+
+def test_exception_mid_write_rolls_back(
+    conn: sqlite3.Connection, clock: FrozenClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import clinic.tools
+
+    def fail_after_update(**_: object) -> None:
+        raise RuntimeError("crash after the UPDATE")
+
+    monkeypatch.setattr(clinic.tools, "CancelOut", fail_after_update)
+    with pytest.raises(RuntimeError, match="after the UPDATE"):
+        cancel(conn, clock, CancelIn(appointment_id=1))
+    assert status(conn, 1) == "booked"
+    assert not conn.in_transaction
+
+
+def test_refuses_to_run_inside_a_caller_transaction(
+    conn: sqlite3.Connection, clock: FrozenClock
+) -> None:
+    conn.execute("UPDATE patients SET name = name")
+    with pytest.raises(RuntimeError, match="transaction"):
+        cancel(conn, clock, CancelIn(appointment_id=1))
+
+
+@pytest.mark.parametrize("value", [True, "1", 1.0])
+def test_appointment_id_must_be_a_real_integer(value: object) -> None:
+    # Review: {"appointment_id": true} was coerced to 1 and cancelled someone's appointment.
+    with pytest.raises(ValidationError):
+        CancelIn.model_validate({"appointment_id": value})

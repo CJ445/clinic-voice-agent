@@ -121,3 +121,32 @@ def test_refuses_to_run_inside_a_caller_transaction(
     conn.execute("UPDATE patients SET name = name")  # opens an implicit transaction
     with pytest.raises(RuntimeError, match="transaction"):
         book(conn, clock, req())
+
+
+def test_exception_mid_write_rolls_back(
+    conn: sqlite3.Connection, clock: FrozenClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Review #5: the rollback-on-exception branch is what prevents a partial write.
+    import clinic.tools
+
+    def fail_after_insert(*_: object, **__: object) -> None:
+        raise RuntimeError("crash after the INSERT")
+
+    monkeypatch.setattr(clinic.tools, "_booked", fail_after_insert)
+    before = count(conn, "appointments"), count(conn, "patients")
+    with pytest.raises(RuntimeError, match="after the INSERT"):
+        book(conn, clock, req())
+    assert (count(conn, "appointments"), count(conn, "patients")) == before
+    assert not conn.in_transaction
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+def test_blank_name_is_rejected(name: str) -> None:
+    with pytest.raises(ValidationError):
+        BookIn(slot_id=FREE, patient_name=name, phone="9876543210", idempotency_key="k")
+
+
+@pytest.mark.parametrize("phone", ["+", " + "])
+def test_bare_plus_is_rejected(phone: str) -> None:
+    with pytest.raises(ValidationError):
+        req(phone=phone)

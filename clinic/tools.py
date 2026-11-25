@@ -283,7 +283,7 @@ def _book(conn: sqlite3.Connection, clock: Clock, req: BookIn) -> BookOut | Tool
 class CancelIn(Model):
     """Cancel by appointment_id, or by the patient's phone plus the slot_id. Exactly one way."""
 
-    appointment_id: int | None = Field(default=None, ge=1)
+    appointment_id: int | None = Field(default=None, ge=1, strict=True)  # true must not become 1
     phone: str | None = None
     slot_id: str | None = Field(default=None, min_length=1, max_length=40)
 

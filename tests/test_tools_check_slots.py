@@ -4,6 +4,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
 
 from clinic.clock import IST, FrozenClock
 from clinic.tools import CheckSlotsIn, CheckSlotsOut, ToolError, check_slots
@@ -97,3 +98,9 @@ def test_results_are_capped_and_say_so(conn: sqlite3.Connection, clock: FrozenCl
     assert [s.start for s in out.slots] == sorted(s.start for s in out.slots)
     few = ask(conn, clock, doctor="Khan", date_from=MON, date_to=MON, max_results=50)
     assert isinstance(few, CheckSlotsOut) and few.more is False
+
+
+@pytest.mark.parametrize("max_results", [0, 51])
+def test_max_results_bounds(max_results: int) -> None:
+    with pytest.raises(ValidationError):
+        CheckSlotsIn(date_from=MON, date_to=MON, max_results=max_results)
