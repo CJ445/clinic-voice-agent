@@ -5,6 +5,25 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ---
 
+## 2026-11-25 — session 2, M2 (in progress)
+
+- **M2.1** (branch `m2/schema-seed`): `bb92b90` IST clock → `a90cc6f` schema with DB-enforced
+  invariants → `ddb882f` deterministic seed → `49e8dfe` review fixes.
+- **M2.1 `/review` log** (fixed: naive read, untested seed boundary, weak clock test, race claim,
+  assertions that couldn't fail; the rest is logged here, not discussed):
+  - Open question for Cyril: the DB lets an appointment be booked on a `blocked` slot. Not
+    enforced or tested either way yet; M2.2 `book()` must refuse it at minimum.
+  - `seed.build`: `executescript` commits the schema on its own, so a failed insert leaves a
+    half-built file that the next run refuses to overwrite; `conn.close()` isn't in `finally`.
+  - The `start` CHECK is a format check only (`2026-13-99T99:99:99+05:30` passes). Slots for one
+    doctor can overlap if they start at different times; `UNIQUE (doctor_id, start)` is untested.
+  - An idempotency key stays used after its appointment is cancelled (pinned by a test); M2.2's
+    retry semantics depend on it, so confirm it's intended.
+  - Two truly concurrent writers hit SQLite's busy/locked path (`timeout=5`) before the UNIQUE
+    index: `book()` must handle `OperationalError` as well as `IntegrityError` (M2.3).
+  - Test connections aren't closed (fixtures should `yield` and close); nothing checks that
+    other `Clock` implementations return IST.
+
 ## 2026-11-25 — session 2 (M0.3)
 
 - **Milestone / task:** M0.3 GPU co-residency smoke test (branch `m0/gpu-smoke`, not pushed)
