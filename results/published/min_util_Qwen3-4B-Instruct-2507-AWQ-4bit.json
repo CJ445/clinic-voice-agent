@@ -1,0 +1,54 @@
+{
+  "commit": "c9d35d8",
+  "dirty": false,
+  "allow_dirty": false,
+  "command": "python -m bench.min_util --llm cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit@b37d1ccb77 --lo 0.35 --hi 0.70",
+  "date_utc": "2026-11-25T16:32:28+00:00",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "driver": "570.207",
+  "llm": {
+    "repo": "cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit",
+    "revision": "b37d1ccb77",
+    "cuda_graphs": true
+  },
+  "max_model_len": 4096,
+  "criterion": "vLLM ready and 'Maximum concurrency' >= 1.0x at max_model_len",
+  "min_gpu_memory_utilization": 0.59,
+  "trials": [
+    {
+      "util": 0.7,
+      "concurrency": 2.21,
+      "ok": true
+    },
+    {
+      "util": 0.35,
+      "concurrency": null,
+      "ok": false
+    },
+    {
+      "util": 0.52,
+      "concurrency": null,
+      "ok": false
+    },
+    {
+      "util": 0.61,
+      "concurrency": 1.36,
+      "ok": true
+    },
+    {
+      "util": 0.56,
+      "concurrency": null,
+      "ok": false
+    },
+    {
+      "util": 0.58,
+      "concurrency": null,
+      "ok": false
+    },
+    {
+      "util": 0.59,
+      "concurrency": 1.08,
+      "ok": true
+    }
+  ]
+}
