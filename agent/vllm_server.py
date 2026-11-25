@@ -19,6 +19,10 @@ from pathlib import Path
 PORT = 8011
 MAX_MODEL_LEN = 4096
 BASE_URL = f"http://127.0.0.1:{PORT}"
+# stop(): SIGTERM grace, then SIGKILL grace, then the bound on reaping the server process.
+TERM_GRACE_S = 60
+KILL_GRACE_S = 10
+WAIT_S = 5
 
 
 # vLLM 0.19.1 prints e.g. "Maximum concurrency for 4,096 tokens per request: 3.08x".
@@ -116,14 +120,21 @@ def _signal_and_wait(proc: subprocess.Popen[bytes], sig: int, grace_s: float) ->
 
 
 def stop(proc: subprocess.Popen[bytes]) -> None:
-    """SIGTERM vLLM's whole process group, then SIGKILL whatever is left after 60 s.
+    """SIGTERM vLLM's whole process group, then SIGKILL whatever is left after TERM_GRACE_S.
 
     Always signals the group, even if the server process already exited: its engine child
-    holds the VRAM and can outlive it (review #3).
+    holds the VRAM and can outlive it (review #3). Raises RuntimeError rather than returning
+    while the group may still hold VRAM, and never waits without a limit (review M0.3 #1).
     """
-    if not _signal_and_wait(proc, signal.SIGTERM, grace_s=60):
-        _signal_and_wait(proc, signal.SIGKILL, grace_s=10)
-    proc.wait()
+    gone = _signal_and_wait(proc, signal.SIGTERM, grace_s=TERM_GRACE_S)
+    if not gone:
+        gone = _signal_and_wait(proc, signal.SIGKILL, grace_s=KILL_GRACE_S)
+    if not gone:
+        raise RuntimeError(f"vLLM process group {proc.pid} survived SIGKILL; its VRAM may be held")
+    try:
+        proc.wait(timeout=WAIT_S)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"vLLM process {proc.pid} was not reaped after {WAIT_S} s") from exc
 
 
 def chat(system: str, user: str, max_tokens: int = 64) -> str:

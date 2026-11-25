@@ -103,6 +103,42 @@ def test_stop_is_safe_when_everything_already_exited() -> None:
     vllm_server.stop(proc)  # must not raise ProcessLookupError
 
 
+def test_stop_raises_when_sigkill_leaves_the_group_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Review M0.3 #1: a process stuck in a CUDA call can survive SIGKILL for a while; stop() used to
+    # ignore that and return (or hang) while the VRAM was still held.
+    proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    real_killpg = os.killpg
+
+    def signals_do_nothing(pgid: int, sig: int) -> None:
+        if sig == 0:
+            real_killpg(pgid, 0)  # existence checks are real, so the group looks alive
+
+    monkeypatch.setattr(vllm_server.os, "killpg", signals_do_nothing)
+    monkeypatch.setattr(vllm_server, "TERM_GRACE_S", 0.3)
+    monkeypatch.setattr(vllm_server, "KILL_GRACE_S", 0.3)
+    try:
+        with pytest.raises(RuntimeError, match=f"{proc.pid} survived SIGKILL"):
+            vllm_server.stop(proc)
+    finally:
+        real_killpg(proc.pid, 9)
+        proc.wait()
+
+
+def test_stop_final_wait_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    proc = subprocess.Popen(["true"], start_new_session=True)
+    proc.wait()
+    timeouts: list[float | None] = []
+
+    def never_reaped(timeout: float | None = None) -> int:
+        timeouts.append(timeout)
+        raise subprocess.TimeoutExpired("vllm", timeout or 0)
+
+    monkeypatch.setattr(proc, "wait", never_reaped)
+    with pytest.raises(RuntimeError, match=f"{proc.pid} was not reaped"):
+        vllm_server.stop(proc)
+    assert timeouts == [vllm_server.WAIT_S]
+
+
 def test_server_binds_to_localhost_only() -> None:
     # Second review: without --host, the unauthenticated bench server listened on every
     # interface while it ran.
