@@ -172,9 +172,39 @@ def test_not_a_plain_day(text: str, now: datetime, expected: str) -> None:
     check(text, expected, now)
 
 
+SUN = datetime(2026, 12, 6, 10, 0, tzinfo=IST)
+
+# Review #1 and #7 (Cyril: "next week X" = X in the following week; "next X" said on a Sunday is
+# ambiguous, since Monday- and Sunday-start weeks disagree only then), #6 and #10.
+WEEKS_AND_POSITIONS = [
+    ("agle hafte friday", MON, "2026-12-11"),
+    ("next week Friday", MON, "2026-12-11"),
+    ("Friday next week", MON, "2026-12-11"),
+    ("agle hafte ke somvar ko subah", MON, "2026-12-07 morning"),
+    ("अगले हफ्ते शुक्रवार", MON, "2026-12-11"),
+    ("next week Monday", SAT, "2026-12-07"),
+    ("pichhle hafte friday", MON, "ambiguous: past"),
+    ("next Saturday", SUN, "ambiguous: which_week"),
+    ("next Monday", SUN, "ambiguous: which_week"),
+    ("agle hafte friday", SUN, "ambiguous: which_week"),
+    ("Friday", SUN, "2026-12-11"),  # bare weekday: still the coming one
+    ("Is Monday ok?", MON, "ambiguous: weekday_is_today"),  # English "is", not Hindi "this"
+    ("is somvar", MON, "2026-11-30"),  # Hindi "is" = this
+    ("mera 2nd appointment hai shaam ko", MON, "ambiguous: no_day"),  # not a date position
+    ("2nd opinion chahiye kal", MON, "2026-12-01"),
+    ("3rd floor pe aana hai parso", MON, "2026-12-02"),
+]
+
+
+@pytest.mark.parametrize(("text", "now", "expected"), WEEKS_AND_POSITIONS)
+def test_weeks_and_positions(text: str, now: datetime, expected: str) -> None:
+    check(text, expected, now)
+
+
 def test_the_table_has_at_least_40_cases() -> None:
     # PLAN M2.4 exit: >= 40 table cases incl. Hinglish and ambiguous ones.
-    table = RELATIVE_DAYS + AMBIGUOUS_RELATIVE + WEEKDAYS + DAYS_OF_MONTH + NOT_A_PLAIN_DAY
+    table = RELATIVE_DAYS + AMBIGUOUS_RELATIVE + WEEKDAYS + DAYS_OF_MONTH
+    table += NOT_A_PLAIN_DAY + WEEKS_AND_POSITIONS
     ambiguous = [row for row in table if row[-1].startswith("ambiguous")]
     assert len(table) >= 40 and len(ambiguous) >= 10
 

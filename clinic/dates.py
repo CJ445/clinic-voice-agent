@@ -68,8 +68,26 @@ DAY_AFTER = {"parso", "parson", "parsoon", "परसों", "परसो"}
 YESTERDAY = {"yesterday"}
 STT_KAL = {"कर"}  # what STT made of कल in our M0 smoke test
 PAST_MARKERS = {
-    *("tha", "thi", "gaya", "gayi", "gaye", "kiya", "kiye", "hua", "hui", "was", "were"),
-    *("था", "थी", "थे", "गया", "गई", "गए", "किया", "हुआ", "हुई"),
+    "tha",
+    "thi",
+    "gaya",
+    "gayi",
+    "gaye",
+    "kiya",
+    "kiye",
+    "hua",
+    "hui",
+    "was",
+    "were",
+    "था",
+    "थी",
+    "थे",
+    "गया",
+    "गई",
+    "गए",
+    "किया",
+    "हुआ",
+    "हुई",
 }  # romanised "the" (they were) is left out: it collides with English "the"
 LAST = {"last", "pichhle", "pichla", "pichli", "पिछले", "पिछला", "पिछली"}  # before a weekday
 NEGATION = {"nahi", "nahin", "nai", "not", "no", "नहीं", "नही"}  # not "na": a common filler
@@ -145,7 +163,25 @@ for number, names in enumerate(
 ):
     WEEKDAYS.update(dict.fromkeys(names.split(), number))
 NEXT = {"next", "agle", "agla", "agli", "अगले", "अगला", "अगली"}
-THIS = {"this", "is", "iss", "coming", "इस"}
+THIS = {"this", "is", "iss", "coming", "इस"}  # "is"/"iss" only before a Hindi weekday name
+ENGLISH_DAY_NAMES = {
+    "monday",
+    "mon",
+    "tuesday",
+    "tue",
+    "tues",
+    "wednesday",
+    "wed",
+    "thursday",
+    "thu",
+    "thur",
+    "thurs",
+    "friday",
+    "fri",
+    "saturday",
+    "sunday",
+}  # "Is Monday ok?" is English: "is" there is not Hindi "this"
+WEEK = {"week", "hafte", "hafta", "हफ्ते", "हफ़्ते", "हफ्ता", "सप्ताह"}  # after next/agle or last
 TARIKH = {"tarikh", "tareekh", "tarik", "तारीख", "तारिख"}  # "date", after a number
 ORDINAL = re.compile(r"(\d{1,2})(?:st|nd|rd|th)")
 DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
@@ -185,7 +221,7 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
     for i, word in enumerate(said):
         number = day_number(said, i)
         if word in WEEKDAYS:
-            day = weekday(WEEKDAYS[word], said[i - 1] if i else "", today)
+            day = weekday(said, i, today)
             if isinstance(day, Ambiguous):
                 return day
             days.append(day)
@@ -217,16 +253,37 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
     return Resolved(distinct[0], distinct[0], part)
 
 
-def weekday(number: int, before: str, today: date) -> date | Ambiguous:
-    """The date a weekday name means, given the word before it (next/agle, this/is, or none)."""
+def follows(said: list[str], first: set[str], second: set[str]) -> bool:
+    """True if a word from `first` comes right before a word from `second` anywhere."""
+    return any(a in first and b in second for a, b in zip(said, said[1:], strict=False))
+
+
+def weekday(said: list[str], i: int, today: date) -> date | Ambiguous:
+    """The date the weekday name said[i] means, given the words around it.
+
+    Weeks start on Monday, except that "next ..." said on a Sunday is ambiguous: Monday- and
+    Sunday-start weeks disagree only then (Cyril).
+    """
+    word, before = said[i], said[i - 1] if i else ""
+    number = WEEKDAYS[word]
     ahead = (number - today.weekday()) % 7  # 0 when it is that weekday today
-    if before in LAST:
+    sunday = today.weekday() == 6
+    if before in LAST or follows(said, LAST, WEEK):
         return Ambiguous("past", "'last' names a past day; ask which day to book")
-    if before in THIS:
+    if follows(said, NEXT, WEEK):  # "agle hafte friday": that weekday in the following week
+        day = today + timedelta(days=7 - today.weekday() + number)
+        if sunday:
+            return Ambiguous(
+                "which_week",
+                "'next week' said on a Sunday; ask which",
+                (day, day + timedelta(days=7)),
+            )
+        return day
+    if before in THIS and not (before in {"is", "iss"} and word in ENGLISH_DAY_NAMES):
         return today + timedelta(days=ahead)
     coming = today + timedelta(days=ahead or 7)
     if before in NEXT:
-        if number > today.weekday():  # that weekday is still ahead this week
+        if sunday or number > today.weekday():  # this week's X may still be ahead
             later = coming + timedelta(days=7)
             return Ambiguous(
                 "which_week",
@@ -244,10 +301,20 @@ def weekday(number: int, before: str, today: date) -> date | Ambiguous:
 
 
 def day_number(said: list[str], i: int) -> int | None:
-    """The day number if said[i] names a day of the month ("5th", or "5" before tarikh)."""
+    """The day number if said[i] names a day of the month ("5th", or "5" before tarikh).
+
+    An ordinal counts only in a date position: after "the" or a weekday, before tarikh/of/ko or
+    a part of the day, or last. "2nd appointment" and "3rd floor" are not dates.
+    """
     ordinal = ORDINAL.fullmatch(said[i])
     if ordinal:
-        return int(ordinal.group(1))
+        before = said[i - 1] if i else ""
+        after = said[i + 1] if i + 1 < len(said) else ""
+        parts = set().union(*PARTS.values())
+        dated = before == "the" or before in WEEKDAYS or not after
+        if dated or after in TARIKH | {"of", "ko"} | parts:
+            return int(ordinal.group(1))
+        return None
     if said[i].isdigit() and i + 1 < len(said) and said[i + 1] in TARIKH:
         return int(said[i])
     return None
