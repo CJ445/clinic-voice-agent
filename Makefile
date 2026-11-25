@@ -1,4 +1,4 @@
-.PHONY: setup lint format types test check eval-text eval-audio bench vram gate
+.PHONY: setup lint format types test cov check eval-text eval-audio bench vram gate
 
 setup:
 	uv sync --locked --group gpu  # plain `uv sync` would uninstall the gpu group
@@ -20,6 +20,11 @@ test:
 	uv run pytest -q -m "not gpu"
 
 # Gate G1 — must pass before every commit
+# M2 exit criterion: clinic/tools.py 100% branch-covered. Fails if it drops.
+cov:
+	uv run pytest -q -m "not gpu" --cov=clinic.tools --cov-branch \
+		--cov-report=term-missing --cov-fail-under=100
+
 check: lint types test
 
 # Targets below are implemented in later milestones; they fail loudly until then.
