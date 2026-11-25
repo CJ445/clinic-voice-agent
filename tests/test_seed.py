@@ -130,3 +130,10 @@ def test_pre_booked_appointments_sit_on_open_future_slots(db: sqlite3.Connection
 def test_seed_now_is_a_monday_morning_in_ist() -> None:
     assert SEED_NOW.tzinfo is IST and SEED_NOW.weekday() == 0 and SEED_NOW.hour < 9
     assert datetime(2026, 11, 30, 8, 0, tzinfo=IST) == SEED_NOW
+
+
+def test_seeded_appointments_carry_the_patients_name(db: sqlite3.Connection) -> None:
+    rows = db.execute(
+        "SELECT a.patient_name, p.name FROM appointments a JOIN patients p ON p.id = a.patient_id"
+    ).fetchall()
+    assert rows and all(appt == patient for appt, patient in rows)

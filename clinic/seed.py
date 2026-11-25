@@ -88,10 +88,20 @@ def build(path: Path | str, clock: Clock | None = None) -> None:
             )
         for doctor_id, n in BLOCKED:
             conn.execute("UPDATE slots SET status = 'blocked' WHERE id = ?", (ids[doctor_id][n],))
+        names = {patient_id: name for patient_id, name, _ in PATIENTS}
         for i, (doctor_id, n, patient_id, status) in enumerate(APPOINTMENTS, start=1):
             conn.execute(
-                "INSERT INTO appointments VALUES (?, ?, ?, ?, ?, ?)",
-                (i, ids[doctor_id][n], patient_id, status, f"seed-{i}", to_db_time(now)),
+                "INSERT INTO appointments (id, slot_id, patient_id, patient_name, status,"
+                " idempotency_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    i,
+                    ids[doctor_id][n],
+                    patient_id,
+                    names[patient_id],
+                    status,
+                    f"seed-{i}",
+                    to_db_time(now),
+                ),
             )
     conn.close()
 

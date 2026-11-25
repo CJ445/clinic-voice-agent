@@ -19,8 +19,9 @@ INSERT_SLOT = (
     "INSERT INTO slots (id, doctor_id, start, duration_min, status) VALUES (?, 1, ?, 30, 'open')"
 )
 INSERT_APPT = (
-    "INSERT INTO appointments (id, slot_id, patient_id, status, idempotency_key, created_at)"
-    " VALUES (?, ?, ?, 'booked', ?, ?)"
+    "INSERT INTO appointments"
+    " (id, slot_id, patient_id, patient_name, status, idempotency_key, created_at)"
+    " VALUES (?, ?, ?, 'Asha', 'booked', ?, ?)"
 )
 
 
@@ -109,3 +110,40 @@ def test_to_db_time_rejects_naive_and_converts_to_ist() -> None:
         to_db_time(datetime(2026, 11, 30, 9, 0))  # noqa: DTZ001 (naive on purpose)
     utc = datetime.fromisoformat("2026-11-30T03:30:00+00:00")
     assert to_db_time(utc) == "2026-11-30T09:00:00+05:30"
+
+
+def test_db_rejects_booking_a_blocked_slot(db: sqlite3.Connection) -> None:
+    # Cyril's option 3 (M2.1 review): the DB is the safety net; book() also checks first.
+    db.execute("UPDATE slots SET status = 'blocked' WHERE id = 's1'")
+    with pytest.raises(sqlite3.IntegrityError, match="slot is blocked"):
+        book(db, 1, 1, "k1")
+
+
+def test_db_rejects_reactivating_an_appointment_on_a_blocked_slot(db: sqlite3.Connection) -> None:
+    book(db, 1, 1, "k1")
+    db.execute("UPDATE appointments SET status = 'cancelled' WHERE id = 1")
+    db.execute("UPDATE slots SET status = 'blocked' WHERE id = 's1'")
+    with pytest.raises(sqlite3.IntegrityError, match="slot is blocked"):
+        db.execute("UPDATE appointments SET status = 'booked' WHERE id = 1")
+
+
+def test_db_rejects_blocking_a_slot_that_is_booked(db: sqlite3.Connection) -> None:
+    book(db, 1, 1, "k1")
+    with pytest.raises(sqlite3.IntegrityError, match="slot has an active appointment"):
+        db.execute("UPDATE slots SET status = 'blocked' WHERE id = 's1'")
+
+
+def test_blocking_is_allowed_once_the_appointment_is_cancelled(db: sqlite3.Connection) -> None:
+    book(db, 1, 1, "k1")
+    db.execute("UPDATE appointments SET status = 'cancelled' WHERE id = 1")
+    db.execute("UPDATE slots SET status = 'blocked' WHERE id = 's1'")
+
+
+@pytest.mark.parametrize("name", [None, "", "   "])
+def test_db_rejects_an_appointment_without_a_name(db: sqlite3.Connection, name: str | None) -> None:
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO appointments (slot_id, patient_id, patient_name, status, idempotency_key,"
+            " created_at) VALUES ('s1', 1, ?, 'booked', 'k', ?)",
+            (name, START),
+        )
