@@ -12,8 +12,8 @@ to pass the caller's words here and say the answer back.
 
 Rules (Cyril's rulings in M2.4 are marked *):
 - kal/कल/tomorrow is the next calendar day*, aaj is today, parso is the day after tomorrow.
-  From 00:00 to 04:00 IST, aaj/kal/tomorrow are ambiguous*: at 00:30 "kal subah" probably means
-  the coming morning. (parso keeps the calendar rule; not covered by the ruling.)
+  From 00:00 to 04:00 IST, aaj/kal/tomorrow/parso are ambiguous*: at 00:30 "kal subah" probably
+  means the coming morning, and parso is off by one the same way.
 - A weekday is the coming one; said on that weekday, it is ambiguous. "this/is X" is the coming X.
   "next X" is ambiguous while this week (Monday start) still has an X*, and always on a Sunday*.
   "agle hafte X" / "next week X" is X in the following week*.
@@ -56,7 +56,7 @@ AmbiguousCode = Literal[
     "negated",  # kal nahi: a day the caller just turned down
     "night",  # raat: "kal raat" is often last night, and the clinic is shut
     "month_named",  # a month word: not parsed yet, so never guess the month
-    "after_midnight",  # aaj/kal between 00:00 and 04:00 IST: which day does the caller mean?
+    "after_midnight",  # aaj/kal/parso between 00:00 and 04:00 IST: which day is meant?
 ]
 
 
@@ -95,7 +95,7 @@ PAST_MARKERS = {
     "हुआ",
     "हुई",
 }  # romanised "the" (they were) is left out: it collides with English "the"
-SMALL_HOURS_END = 4  # IST hour; before it, aaj/kal/tomorrow are ambiguous
+SMALL_HOURS_END = 4  # IST hour; before it, aaj/kal/tomorrow/parso are ambiguous
 LAST = {"last", "pichhle", "pichla", "pichli", "पिछले", "पिछला", "पिछली"}  # before a weekday
 NEGATION = {"nahi", "nahin", "nai", "not", "no", "नहीं", "नही"}  # not "na": a common filler
 NIGHT = {"raat", "rat", "night", "tonight", "रात"}
@@ -226,6 +226,10 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
     part = parts[0] if parts else None
 
     days: list[date] = []  # one entry per day expression the caller used
+    # From 00:00 to 04:00, aaj/kal/parso may be counted from the coming morning (Cyril): note it
+    # and the earlier reading here, and decide after the loop, so other days named are kept.
+    after_midnight = False
+    earlier: list[date] = []
     for i, word in enumerate(said):
         number = day_number(said, i)
         if word in WEEKDAYS:
@@ -238,17 +242,19 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
             if isinstance(day, Ambiguous):
                 return day
             days.append(day)
-        elif word in TODAY or word in TOMORROW or word in KAL:
-            if small_hours:  # Cyril: at 00:30, "kal subah" probably means this coming morning
-                tomorrow = today + timedelta(days=1)
-                return Ambiguous(
-                    "after_midnight",
-                    "it is just after midnight; confirm the date",
-                    (today,) if word in TODAY else (today, tomorrow),
-                )
-            days.append(today if word in TODAY else today + timedelta(days=1))
+        elif word in TODAY:
+            days.append(today)
+            after_midnight = after_midnight or small_hours
+        elif word in TOMORROW or word in KAL:
+            days.append(today + timedelta(days=1))
+            if small_hours:  # at 00:30, "kal subah" probably means this coming morning
+                after_midnight = True
+                earlier.append(today)
         elif word in DAY_AFTER:
             days.append(today + timedelta(days=2))
+            if small_hours:  # parso is off by one the same way (Cyril, M2 close-out)
+                after_midnight = True
+                earlier.append(today + timedelta(days=1))
         elif word in YESTERDAY:
             return Ambiguous("past", "yesterday is in the past; ask which day")
 
@@ -260,6 +266,9 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
         return Ambiguous("no_day", "no day mentioned; ask which day")
     if PAST_MARKERS.intersection(said):  # "kal gaya tha" = yesterday; "Friday ko gaya tha"
         return Ambiguous("past", "the sentence is in the past tense; ask which day to book")
+    if after_midnight:
+        readings = tuple(sorted(set(days + earlier)))
+        return Ambiguous("after_midnight", "it is just after midnight; confirm the date", readings)
     distinct = sorted(set(days))
     if len(distinct) > 1:
         return Ambiguous("two_days", "more than one day mentioned; ask which one", tuple(distinct))
