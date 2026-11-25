@@ -205,7 +205,7 @@ AT_0030 = datetime(2026, 12, 1, 0, 30, tzinfo=IST)
 AT_0359 = datetime(2026, 12, 1, 3, 59, tzinfo=IST)
 AT_0400 = datetime(2026, 12, 1, 4, 0, tzinfo=IST)
 
-# Review #8 (Cyril): from 00:00 to 04:00 IST, aaj/kal/tomorrow are ambiguous: at 00:30, "kal
+# Review #8 (Cyril): from 00:00 to 04:00 IST, aaj/kal/tomorrow/parso are ambiguous: at 00:30, "kal
 # subah" probably means the morning a few hours away, not the calendar day after.
 AFTER_MIDNIGHT = [
     ("kal subah", AT_0030, "ambiguous: after_midnight"),
@@ -238,6 +238,27 @@ def test_after_midnight_parso_offers_both_days() -> None:
     result = resolve("parso", AT_0030)
     assert isinstance(result, Ambiguous)
     assert [d.isoformat() for d in result.candidates] == ["2026-12-02", "2026-12-03"]
+
+
+@pytest.mark.parametrize(
+    ("text", "candidates"),
+    [
+        ("Friday ya parso", ["2026-12-02", "2026-12-03", "2026-12-04"]),  # Friday is kept
+        ("parso ya kal", ["2026-12-01", "2026-12-02", "2026-12-03"]),
+        ("kal ya parso", ["2026-12-01", "2026-12-02", "2026-12-03"]),  # word order doesn't matter
+    ],
+)
+def test_after_midnight_keeps_every_day_named(text: str, candidates: list[str]) -> None:
+    # Review (follow-up) #1: the early return used to drop the other days the caller named.
+    result = resolve(text, AT_0030)
+    assert isinstance(result, Ambiguous) and result.code == "after_midnight"
+    assert [d.isoformat() for d in result.candidates] == candidates
+
+
+@pytest.mark.parametrize("text", ["parso gaya tha", "kal aaya tha", "aaj call kiya tha"])
+def test_past_tense_wins_after_midnight(text: str) -> None:
+    # Review (follow-up) #2: past tense is the better reason to give the caller.
+    check(text, "ambiguous: past", AT_0030)
 
 
 def test_the_table_has_at_least_40_cases() -> None:
