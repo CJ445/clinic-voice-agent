@@ -31,16 +31,22 @@ models fit with ≥ 500 MiB headroom, or an ADR records the fallback (smaller LL
 - [ ] ADR-0001 Pipecat vs hand-rolled asyncio pipeline
 - [ ] ADR-0002 STT: faster-whisper vs IndicConformer (decide **after** M4.3 WER bench; record "provisional")
 - [ ] ADR-0003 LLM model + quantization under 8 GB
+  - [ ] Qwen3-4B-Instruct-2507 AWQ (`cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit`, community quant):
+        `bench.min_util` search + `make vram` run → input to ADR-0003 option 2
+        (sources: `docs/research/2026-11-25-related-repos.md`)
 - [ ] ADR-0004 LangGraph scope: logic only, hybrid single-LLM-node + guard nodes
 - [ ] ADR-0005 Latency metric definition (what "start" and "end" mean, exactly)
 - [ ] ADR-0006 Eval scoring: deterministic DB-state checks + LLM judge only for hallucination
+- [ ] ADR-0007 Build vs adopt Pipecat Evals for the simulator (Cyril's leaning: adopt the runner;
+      build DB-state scoring, scripted interruption timing, Hinglish personas, P95/CI stats, the gate)
 
 **Exit:** each ADR has Context / Options / Decision / Consequences / "How we'd know we were wrong".
 
 ## M2 — Clinic backend + tools (day 2–3)
 
 - [ ] M2.1 SQLite schema (doctors, slots, appointments, patients), deterministic `seed.py`
-- [ ] M2.2 Tools `check_slots`, `book`, `cancel` with Pydantic I/O schemas
+- [ ] M2.2 Tools `check_slots`, `book`, `cancel` with Pydantic I/O schemas; `book` takes a slot ID
+      returned by `check_slots` (never a free-text date/time) and rejects unknown IDs
 - [ ] M2.3 Edge-case tests: double booking, past slot, cancel nonexistent, IST midnight boundary,
       idempotent retry of `book`
 - [ ] M2.4 Date resolution helper ("next Friday", "parso", "kal shaam") + table-driven tests
@@ -61,7 +67,8 @@ models fit with ≥ 500 MiB headroom, or an ADR records the fallback (smaller LL
 - [ ] M4.1 Pipecat pipeline: Silero VAD → STT → LangGraph → TTS, browser WebRTC client
 - [ ] M4.2 Per-stage timestamps (events per ADR-0005) → `results/latency_*.json`
 - [ ] M4.3 `bench/stt_wer.py`: Whisper vs IndicConformer on your own 50 recorded clinic utterances
-      (8 kHz resampled) → finalize ADR-0002
+      (8 kHz resampled); score WER **and** entity errors (dates, times, names, phone numbers)
+      → finalize ADR-0002
 - [ ] M4.4 Barge-in: cancel in-flight LLM/TTS; **test: no DB mutation from a cancelled turn**
 - [ ] M4.5 Record baseline P50/P95 (reasonable v1, not sandbagged) → `make bench`
 

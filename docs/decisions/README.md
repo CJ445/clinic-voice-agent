@@ -11,3 +11,4 @@ Create one with `/adr <short title>` in Claude Code, then **rewrite the Decision
 | 0004 | LangGraph scope | proposed |
 | 0005 | Latency metric definition | proposed |
 | 0006 | Eval scoring method | proposed |
+| 0007 | Build vs adopt Pipecat Evals | proposed |
