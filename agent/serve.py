@@ -91,6 +91,17 @@ def _sigterm_as_interrupt(signum: int, frame: FrameType | None) -> None:
     raise KeyboardInterrupt
 
 
+def stop_uninterruptibly(proc: subprocess.Popen[bytes]) -> None:
+    """Stop vLLM with Ctrl-C and SIGTERM ignored, so a second one can't abandon a group that
+    still holds VRAM (review #4). The previous handlers come back afterwards."""
+    previous = {sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        vllm_server.stop(proc)
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Serve the dialogue LLM with vLLM (PLAN M3.1)")
     parser.add_argument("--llm", required=True, help="REPO@FULL_40_CHAR_SHA")
@@ -112,7 +123,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print("stopping vLLM", flush=True)
     finally:
-        vllm_server.stop(proc)
+        stop_uninterruptibly(proc)
 
 
 if __name__ == "__main__":

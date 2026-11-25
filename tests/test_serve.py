@@ -107,3 +107,22 @@ def test_main_refuses_an_unmeasured_model_before_starting_vllm(
     monkeypatch.setattr("sys.argv", ["agent.serve", "--llm", f"{REPO}@{FULL}"])
     with pytest.raises(LookupError, match="no measured minimum"):
         serve.main()
+
+
+def test_stop_cannot_be_interrupted_by_a_second_ctrl_c(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Review #4: an impatient second Ctrl-C during stop()'s 60 s grace raised KeyboardInterrupt
+    # inside it and left vLLM's process group holding VRAM.
+    import signal
+
+    seen: list[object] = []
+    monkeypatch.setattr(
+        serve.vllm_server,
+        "stop",
+        lambda proc: seen.extend(
+            [signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)]
+        ),
+    )
+    before = (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM))
+    serve.stop_uninterruptibly(object())  # type: ignore[arg-type]
+    assert seen == [signal.SIG_IGN, signal.SIG_IGN]
+    assert (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)) == before
