@@ -7,7 +7,8 @@ Writes results/vram.json. Every number comes from nvidia-smi or /proc/meminfo vi
 Per-model MiB is the change in *total* GPU memory, because vLLM's memory belongs to its engine
 child process, not the server PID. vLLM's figure is what it reserved, not what its weights need.
 
-Usage: python -m bench.vram --beam-size N --llm REPO@REVISION:UTIL [--llm ...]
+Usage: python -m bench.vram --beam-size N --llm REPO@REVISION:UTIL [--llm ...] [--allow-dirty]
+Refuses a dirty tree unless --allow-dirty (bench/provenance.py).
 GPU-only imports live inside functions: CI does not install the gpu dependency group.
 """
 
@@ -23,7 +24,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from bench import vllm_server
+from bench import provenance, vllm_server
 from bench.gpu_mem import (
     MIN_HEADROOM_MIB,
     check_record,
@@ -262,15 +263,16 @@ def main() -> None:
     parser.add_argument("--llm", action="append", required=True, help="REPO@REVISION:UTIL")
     parser.add_argument("--beam-size", type=int, required=True, help="production STT beam size")
     parser.add_argument("--out", type=Path, default=Path("results/vram.json"))
+    parser.add_argument("--allow-dirty", action="store_true", help="run on a dirty tree (recorded)")
     args = parser.parse_args()
+    start = provenance.provenance(allow_dirty=args.allow_dirty)  # before touching the GPU
 
     import torch  # pyright: ignore[reportMissingImports]  # only for torch's CUDA build version
 
     gpu = parse_gpu_query(sh("nvidia-smi", GPU_QUERY, CSV))
     runs = [run_isolated(llm, args.beam_size, gpu.total_mib, args.out.parent) for llm in args.llm]
     record = {
-        "commit": sh("git", "rev-parse", "--short", "HEAD").strip(),
-        "dirty": bool(sh("git", "status", "--porcelain").strip()),
+        **provenance.finish(start),
         "command": "python -m bench.vram " + " ".join(sys.argv[1:]),
         "date_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "gpu": gpu.name,
