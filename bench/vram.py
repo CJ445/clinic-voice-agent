@@ -7,7 +7,8 @@ Writes results/vram.json. Every number comes from nvidia-smi or /proc/meminfo vi
 Per-model MiB is the change in *total* GPU memory, because vLLM's memory belongs to its engine
 child process, not the server PID. vLLM's figure is what it reserved, not what its weights need.
 
-Usage: python -m bench.vram --beam-size N --llm REPO@REVISION:UTIL [--llm ...] [--allow-dirty]
+Usage: python -m bench.vram --beam-size N --llm REPO@REVISION:UTIL [--llm ...]
+       [--allow-dirty] [--tools]
 Refuses a dirty tree unless --allow-dirty (bench/provenance.py).
 GPU-only imports live inside functions: CI does not install the gpu dependency group.
 """
@@ -182,7 +183,7 @@ def to_16k(audio: Any) -> Any:
     return np.interp(positions, np.arange(len(audio)), audio).astype(np.float32)
 
 
-def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]:
+def run_one(llm: str, beam: int, total: int, log_dir: Path, tools: bool) -> dict[str, object]:
     repo, _, rest = llm.partition("@")
     revision, _, util = rest.partition(":")
     if parse_compute_apps(sh("nvidia-smi", APPS_QUERY, CSV)):
@@ -190,7 +191,7 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
     at = {"baseline": gpu_used_mib()}  # total GPU MiB used, read after each stage
     log = log_dir / f"vllm_{repo.split('/')[-1]}.log"
     transcript, reply, reply_samples, error = "", "", 0, None
-    proc = vllm_server.start(repo, revision, float(util), log)
+    proc = vllm_server.start(repo, revision, float(util), log, tools=tools)
     try:
         with Peaks(lambda: (gpu_used_mib(), ram_mib()[1]), SAMPLE_INTERVAL_S) as peaks:
             # A model set that does not fit (e.g. STT out of memory) is a result, not a crash:
@@ -221,6 +222,7 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
             "gpu_memory_utilization": float(util),
             "max_model_len": vllm_server.MAX_MODEL_LEN,
             "cuda_graphs": True,
+            "tool_calling": tools,  # --tools: the same vLLM command line as agent.serve
         },
         "stt": {
             "repo": STT_REPO,
@@ -251,12 +253,12 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
     }
 
 
-def run_isolated(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]:
+def run_isolated(llm: str, beam: int, total: int, log_dir: Path, tools: bool) -> dict[str, object]:
     """Run one model set in a fresh process, so its STT model and CUDA context are freed on exit
     and the next run starts from an idle GPU (the baseline check would otherwise see us)."""
     spawn = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=1, mp_context=spawn) as pool:
-        return pool.submit(run_one, llm, beam, total, log_dir).result()
+        return pool.submit(run_one, llm, beam, total, log_dir, tools).result()
 
 
 def main() -> None:
@@ -265,13 +267,17 @@ def main() -> None:
     parser.add_argument("--beam-size", type=int, required=True, help="production STT beam size")
     parser.add_argument("--out", type=Path, default=Path("results/vram.json"))
     parser.add_argument("--allow-dirty", action="store_true", help="run on a dirty tree (recorded)")
+    parser.add_argument("--tools", action="store_true", help="start vLLM as agent.serve does")
     args = parser.parse_args()
     start = provenance.provenance(allow_dirty=args.allow_dirty)  # before touching the GPU
 
     import torch  # pyright: ignore[reportMissingImports]  # only for torch's CUDA build version
 
     gpu = parse_gpu_query(sh("nvidia-smi", GPU_QUERY, CSV))
-    runs = [run_isolated(llm, args.beam_size, gpu.total_mib, args.out.parent) for llm in args.llm]
+    runs = [
+        run_isolated(llm, args.beam_size, gpu.total_mib, args.out.parent, args.tools)
+        for llm in args.llm
+    ]
     record = {
         **provenance.finish(start),
         "command": "python -m bench.vram " + " ".join(sys.argv[1:]),
