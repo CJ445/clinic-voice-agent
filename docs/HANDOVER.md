@@ -7,6 +7,39 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ## 2026-11-25 — session 2, M2 (in progress)
 
+- **M2.2** (branch `m2/tools`): `978d871` pydantic dep → `99953ff` blocked-slot triggers
+  (option 3) → `fa64c95` check_slots → `e65d372` book → `94d421a` cancel → `0ed462c` run() +
+  JSON schemas → review fixes `9a81138` (typed `busy`), `1948822` (untested branches, strict id),
+  `ed4a4c0` (cancel needs phone, option A), `a605a8c` (`appointments.patient_name`, option A),
+  `6a21a5c` (strict xfail for the key collision). `fa64c95` (264 lines) and `e65d372` (271) break
+  the < 200-line rule; I didn't stop to propose a split.
+- **M3.2 must-do (Cyril, review #3 option C):** the orchestrator supplies `idempotency_key`
+  (`session_id + turn_id`) and the key is removed from the LLM-facing schema. The strict xfail
+  `test_same_key_from_two_different_callers_does_not_conflict` goes XPASS when that lands; remove
+  the marker then.
+- **M3.2 / M4.4 constraint (review #7):** the tools are synchronous and can block up to the 5 s
+  busy timeout. Don't call them on the Pipecat event loop; and if they run in
+  `asyncio.to_thread`, cancelling the task does not stop the thread, so `book()` would still
+  commit after a barge-in. The cancelled-turn check must happen *before* the tool is called.
+- **M2.1 items now settled:** the blocked-slot question was settled by option 3; a cancelled
+  appointment's key now gives `idempotency_conflict`; busy/locked returns `busy` from `run()`
+  (the real concurrency tests are still M2.3).
+- **M2.2 `/review` log** (fixed: the 2 must-fix items, the coverage gaps, strict id; the rest is
+  logged here, not discussed):
+  - Branch coverage can't be measured until pytest-cov is added (M2.3 does this).
+  - An `idempotency_key` of `"   "` is accepted; strip it or add a pattern (moot if M3.2 removes
+    it from the LLM schema).
+  - No `part_of_day` covers 22:00–05:00: a late slot shows up only with no filter. Undocumented;
+    the seed has none.
+  - `check_slots` fetches every matching row and filters part of day in Python; push the filter
+    and LIMIT into SQL if ranges get wide.
+  - `TOOLS` is typed `Any`, so pyright doesn't check each function matches its input model.
+  - `assert cursor.lastrowid is not None` in `_book` is skipped under `python -O`.
+  - Dead `# noqa: ANN001` in `tests/test_tools_book.py` and `tests/test_tools_cancel.py` (ANN
+    isn't enabled; type the lambdas as `Callable[[], ...]`); and one in `test_tools_run.py`.
+  - `test_unknown_tool`'s `out == {..., "message": out["message"]}` only checks the key set.
+  - PLAN M2.1 is merged but its box is still unticked (I left it; your call).
+
 - **M2.1** (branch `m2/schema-seed`): `bb92b90` IST clock → `a90cc6f` schema with DB-enforced
   invariants → `ddb882f` deterministic seed → `49e8dfe` review fixes.
 - **M2.1 `/review` log** (fixed: naive read, untested seed boundary, weak clock test, race claim,
