@@ -44,7 +44,7 @@ models fit with ≥ 500 MiB headroom, or an ADR records the fallback (smaller LL
 
 ## M2 — Clinic backend + tools (day 2–3)
 
-- [ ] M2.1 SQLite schema (doctors, slots, appointments, patients), deterministic `seed.py`
+- [x] M2.1 SQLite schema (doctors, slots, appointments, patients), deterministic `seed.py`
 - [x] M2.2 Tools `check_slots`, `book`, `cancel` with Pydantic I/O schemas; `book` takes a slot ID
       returned by `check_slots` (never a free-text date/time) and rejects unknown IDs
 - [x] M2.3 Edge-case tests: double booking, past slot, cancel nonexistent, IST midnight boundary,

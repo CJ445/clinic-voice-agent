@@ -5,7 +5,62 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ---
 
-## 2026-11-25 — session 2, M2 (in progress)
+## 2026-11-25 — session 2, end of M2
+
+- **Milestone / task:** M2 (clinic backend + tools) complete. All four PRs merged: #7 M2.1,
+  #8 M2.2, #9 M2.3, #10 M2.4. Tag `m2-done` is on `830b8ce` (annotated, created locally; Cyril
+  pushes it).
+- **Done:** detail per task is in the "session 2, M2" entry below. In short:
+  - `clinic/tools.py`:
+    - `check_slots` / `book` / `cancel` with slot-ID booking, idempotent `book`, typed
+      `ToolError`s, and `run()`, which never raises on bad LLM input or a busy DB.
+    - `cancel` needs the caller's phone; `appointments.patient_name` is stored per booking.
+  - `tests/test_tools_edges.py`: double booking raced as threads and as OS processes behind a
+    start barrier; IST midnight; past-slot boundary to the second.
+  - `clinic/dates.py`: deterministic `resolve(text, now)` for English, Devanagari and Hinglish;
+    122 table rows, 50 ambiguous (counted by script). Cyril's six rulings are in its docstring.
+  - Gate: `make test` now enforces 100% branch coverage of `clinic/tools.py`.
+    CLAUDE.md rule 1 now lets test and generated files exceed 200 lines; **Cyril approved that
+    wording as merged in #9** (at M2 close-out).
+  - Close-out (`m2/closeout`): the `gpu-budget` skill's "start 0.55" is replaced by the
+    measured minimums (0.36 for 3B, 0.80 for 7B), citing `results/published/min_util_*.json`
+    (`0a764e5`) and `results/published/vram.json` (`1c71cb2`). PLAN M2.1 is ticked (merged in
+    #7, never ticked).
+- **Gate at close:** `make check` on `main` at `830b8ce`: exit 0. Lint and types clean;
+  346 passed, 1 xfailed (the strict M3.2 key-collision xfail); `clinic/tools.py` 100% branch.
+- **In progress (exact state):** nothing uncommitted. `m2/closeout` holds this entry, the
+  skill update and the PLAN tick.
+- **Decided by Cyril at close-out** (to be done in `m2/dates-followup`, with table rows and tests):
+  - `parso` from 00:00 to 04:00 IST gets the same treatment as aaj/kal/tomorrow.
+  - `clinic/dates.py` (100% branch-covered) joins the coverage gate.
+- **M1 ADRs Cyril still owes** (all `proposed`; Claude doesn't draft 0001 or 0004):
+  - **ADR-0001** Pipecat vs hand-rolled pipeline. No file yet. Cyril is writing it. Blocks M4.
+  - **ADR-0002** STT model. No file. Decide after the M4.3 WER bench (record as provisional).
+  - **ADR-0003** LLM + quantization. Drafted, Decision `TODO(Cyril)`. Its input, the
+    Qwen3-4B-Instruct-2507 AWQ `min_util` + `make vram` run, hasn't been done (tomorrow, step 2).
+  - **ADR-0004** LangGraph scope. No file. Cyril is writing it. Blocks M3.2.
+  - **ADR-0005** Latency metric definition. No file. Needed before any M4 latency number.
+  - **ADR-0006** Eval scoring method. No file. Needed before M5's scorers.
+  - **ADR-0007** Build vs adopt Pipecat Evals. No file; Cyril leans to adopting the runner.
+- **Carry into M3 / M4** (also in the M2 entry below):
+  - M3.1: bound `vllm_server.stop()`'s wait and raise if SIGKILL fails (M0.3 review #1).
+  - M3.2: the orchestrator supplies `idempotency_key` (session_id + turn_id) and it leaves the
+    LLM schema; remove the xfail marker when it goes XPASS.
+  - M3.2 / M4.4: tools are synchronous (up to the 5 s busy timeout). Never call them on the
+    Pipecat event loop. A cancelled `asyncio.to_thread` still commits, so check for barge-in
+    *before* calling `book`.
+  - **M4.4 must have a test showing that a barge-in after the tool call was dispatched does not
+    commit a booking** (the `to_thread` issue) (Cyril).
+- **Tomorrow's order (Cyril):**
+  1. `m2/dates-followup`: parso after midnight + `dates.py` in the coverage gate.
+  2. ADR-0003 measurement run: Qwen3-4B-Instruct-2507 AWQ
+     (`cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit`). First check the quant repo's own licence,
+     then `min_util` + `make vram`.
+  3. M3.1 serve script, with the model as an argument.
+- **Next step (first command to run):**
+  `git switch main && git pull --ff-only && make check && git switch -c m2/dates-followup`
+
+## 2026-11-25 — session 2, M2
 
 - **M2.4** (branch `m2/dates`): `7c9d870` aaj/kal/parso + parts of day → `f20dae4` weekdays →
   `580bf7f` drop "sun"/"sat" → `dee3ceb` day of month → review fixes `7733a68` (typed

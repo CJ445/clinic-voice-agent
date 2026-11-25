@@ -6,8 +6,12 @@ description: VRAM budgeting rules for the single 8 GB RTX 4060. Use before addin
 
 Before any GPU change, state the expected VRAM delta and check it against `results/vram.json`.
 
-- vLLM pre-allocates: always pass `--gpu-memory-utilization` explicitly (start 0.55) and
-  `--max-model-len 4096`. Start vLLM FIRST, then load STT/TTS, or they will OOM.
+- vLLM pre-allocates: always pass `--gpu-memory-utilization` explicitly, at the model's
+  measured minimum, and `--max-model-len 4096`. Measured: **0.36** for Qwen2.5-3B-Instruct-AWQ,
+  **0.80** for Qwen2.5-7B-Instruct-AWQ (searched by `python -m bench.min_util`:
+  `results/published/min_util_*.json`, commit `0a764e5`; used in the co-residency run
+  `results/published/vram.json`, commit `1c71cb2`). A new model gets its own `min_util` run
+  first. Start vLLM FIRST, then load STT/TTS, or they will OOM.
 - Keep ≥ 500 MiB headroom; the desktop compositor also uses VRAM on a laptop.
 - Prefer CPU for VAD, turn detection, and TTS unless a benchmark proves GPU is needed.
 - Fallback order if it doesn't fit: shrink `max-model-len` → smaller LLM (4B) → STT to CPU int8.
