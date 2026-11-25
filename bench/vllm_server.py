@@ -41,15 +41,13 @@ def port_in_use(port: int) -> bool:
         return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
-def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[bytes]:
-    """Launch the OpenAI-compatible server. No --enforce-eager, so CUDA graphs stay on.
+def server_command(repo: str, revision: str, util: float) -> list[str]:
+    """The `vllm serve` command line. No --enforce-eager, so CUDA graphs stay on.
 
-    Refuses if the port is already taken: a stale server there would answer /health and
-    wait_ready would accept it as ours (review #9).
+    Bound to 127.0.0.1: the bench server has no authentication, so it must not listen on
+    every network interface while it runs.
     """
-    if port_in_use(PORT):
-        raise RuntimeError(f"port {PORT} is already in use; stop the server holding it first")
-    cmd = [
+    return [
         sys.executable,
         "-m",
         "vllm.entrypoints.openai.api_server",
@@ -59,6 +57,8 @@ def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[
         revision,
         "--served-model-name",
         "llm",
+        "--host",
+        "127.0.0.1",
         "--port",
         str(PORT),
         "--gpu-memory-utilization",
@@ -66,9 +66,20 @@ def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[
         "--max-model-len",
         str(MAX_MODEL_LEN),
     ]
+
+
+def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[bytes]:
+    """Launch the OpenAI-compatible server in its own session.
+
+    Refuses if the port is already taken: a stale server there would answer /health and
+    wait_ready would accept it as ours (review #9). The check is best-effort (another process
+    could take the port between the check and the launch); fine for a single-user bench.
+    """
+    if port_in_use(PORT):
+        raise RuntimeError(f"port {PORT} is already in use; stop the server holding it first")
     # New session so stop() can kill vLLM's engine child process too, not just the server.
     return subprocess.Popen(
-        cmd,
+        server_command(repo, revision, util),
         stdout=log.open("wb"),
         stderr=subprocess.STDOUT,
         start_new_session=True,

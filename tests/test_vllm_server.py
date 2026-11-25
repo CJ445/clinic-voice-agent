@@ -101,3 +101,11 @@ def test_stop_is_safe_when_everything_already_exited() -> None:
     proc = subprocess.Popen(["true"], start_new_session=True)
     proc.wait()
     vllm_server.stop(proc)  # must not raise ProcessLookupError
+
+
+def test_server_binds_to_localhost_only() -> None:
+    # Second review: without --host, the unauthenticated bench server listened on every
+    # interface while it ran.
+    cmd = vllm_server.server_command("some/model", "rev", 0.5)
+    assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
+    assert cmd[cmd.index("--port") + 1] == str(vllm_server.PORT)
