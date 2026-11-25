@@ -7,6 +7,7 @@ Stdlib only, so it type-checks in CI where the gpu dependency group is not insta
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -17,6 +18,19 @@ from pathlib import Path
 PORT = 8011
 MAX_MODEL_LEN = 4096
 BASE_URL = f"http://127.0.0.1:{PORT}"
+
+
+# vLLM 0.19.1 prints e.g. "Maximum concurrency for 4,096 tokens per request: 3.08x".
+_CONCURRENCY = re.compile(r"Maximum concurrency for ([\d,]+) tokens per request: ([\d.]+)x")
+
+
+def parse_max_concurrency(log_text: str, *, max_model_len: int) -> float | None:
+    """Return the last reported concurrency for max_model_len, or None if vLLM never printed it."""
+    found = None
+    for tokens, value in _CONCURRENCY.findall(log_text):
+        if int(tokens.replace(",", "")) == max_model_len:
+            found = float(value)
+    return found
 
 
 def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[bytes]:
