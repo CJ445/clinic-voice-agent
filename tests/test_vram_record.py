@@ -128,3 +128,25 @@ def test_both_errors_are_kept() -> None:
     assert combine_errors(None, "sampler: x") == "sampler: x"
     assert combine_errors("OOM", None) == "OOM"
     assert combine_errors(None, None) is None
+
+
+def test_tool_calling_is_read_from_the_command_vllm_ran() -> None:
+    # Review (ADR-0003 PR) #2: the record must say what was actually launched, not what was asked
+    # for, so a refactor that drops tools= can't leave "tool_calling": true behind.
+    from agent import vllm_server
+    from bench.vram import llm_record
+
+    for tools in (True, False):
+        argv = vllm_server.server_command("some/model", "rev", 0.5, tools=tools)[1:]
+        record = llm_record("some/model", "rev", 0.5, argv)
+        assert record["tool_calling"] is tools
+        assert record["argv"] == argv
+
+
+def test_argv_leaves_out_the_interpreter_path() -> None:
+    from agent import vllm_server
+    from bench.vram import llm_record
+
+    argv = vllm_server.server_command("some/model", "rev", 0.5)[1:]
+    assert argv[:2] == ["-m", "vllm.entrypoints.openai.api_server"]  # no home dir in the record
+    assert llm_record("some/model", "rev", 0.5, argv)["gpu_memory_utilization"] == 0.5

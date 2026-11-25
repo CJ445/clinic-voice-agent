@@ -183,6 +183,19 @@ def to_16k(audio: Any) -> Any:
     return np.interp(positions, np.arange(len(audio)), audio).astype(np.float32)
 
 
+def llm_record(repo: str, revision: str, util: float, argv: list[str]) -> dict[str, object]:
+    """The LLM part of a run record, from the command vLLM was actually started with."""
+    return {
+        "repo": repo,
+        "revision": revision,
+        "gpu_memory_utilization": util,
+        "max_model_len": vllm_server.MAX_MODEL_LEN,
+        "cuda_graphs": "--enforce-eager" not in argv,
+        "tool_calling": "--enable-auto-tool-choice" in argv,  # --tools: as agent.serve starts it
+        "argv": argv,
+    }
+
+
 def run_one(llm: str, beam: int, total: int, log_dir: Path, tools: bool) -> dict[str, object]:
     repo, _, rest = llm.partition("@")
     revision, _, util = rest.partition(":")
@@ -192,6 +205,9 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path, tools: bool) -> dict
     log = log_dir / f"vllm_{repo.split('/')[-1]}.log"
     transcript, reply, reply_samples, error = "", "", 0, None
     proc = vllm_server.start(repo, revision, float(util), log, tools=tools)
+    if not isinstance(proc.args, list):
+        raise TypeError(f"expected vLLM's argv as a list, got {type(proc.args).__name__}")
+    argv = [str(arg) for arg in proc.args][1:]  # what was launched, minus the interpreter path
     try:
         with Peaks(lambda: (gpu_used_mib(), ram_mib()[1]), SAMPLE_INTERVAL_S) as peaks:
             # A model set that does not fit (e.g. STT out of memory) is a result, not a crash:
@@ -216,14 +232,7 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path, tools: bool) -> dict
     mib, ok = summarize(at, peak_gpu=peaks.gpu, total=total, error=error, sampler_error=peaks.error)
     error = combine_errors(error, peaks.error)
     return {
-        "llm": {
-            "repo": repo,
-            "revision": revision,
-            "gpu_memory_utilization": float(util),
-            "max_model_len": vllm_server.MAX_MODEL_LEN,
-            "cuda_graphs": True,
-            "tool_calling": tools,  # --tools: the same vLLM command line as agent.serve
-        },
+        "llm": llm_record(repo, revision, float(util), argv),
         "stt": {
             "repo": STT_REPO,
             "revision": STT_REVISION,
