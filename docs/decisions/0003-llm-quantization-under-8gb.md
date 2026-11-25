@@ -70,15 +70,43 @@ larger measured inference peak (5,430 − 5,252 = +178 MiB, at `4c1d4cc`) as a s
    - Licence: Apache-2.0 (7B) + MIT (Whisper). Cost: about one `make vram` variant plus a CPU
      STT latency run.
 
-2. **A 3–4B LLM instead of the 7B (the Qwen 3B, or another model of that size).**
-   - VRAM: measured for the Qwen 3B: fits with 2,758 MiB headroom (conservative upper bound), leaving room for a larger
-     KV cache or a second STT pass.
-   - Quality: the Qwen 3B's one Hindi sample was unusable (see Context). Other 3–4B instruct
-     models with AWQ builds and Hindi ability are **unverified**: none has been tried here.
-   - Licence: the Qwen 3B is **non-commercial**. Fine for a portfolio/research build; blocks any
-     real clinic deployment. Another model's licence would need checking.
-   - Cost: for another model, a download (~2–3 GB), a `bench.min_util` search and a
-     `make vram` run; a fair Hindi comparison needs the M3/M5 eval, which doesn't exist yet.
+2. **A 3–4B LLM instead of the 7B.** Two candidates are measured.
+   - **Qwen2.5-3B-Instruct-AWQ @ 0.36:**
+     - VRAM: fits with 2,758 MiB headroom (conservative upper bound), leaving room for a
+       larger KV cache or a second STT pass.
+     - Quality: its one Hindi sample was unusable (see Context).
+     - Licence: **non-commercial**. Fine for a portfolio/research build; blocks any real clinic
+       deployment.
+   - **Qwen3-4B-Instruct-2507 AWQ** (`cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit`), as
+     `agent.serve` runs it: utilization 0.61 (its measured minimum 0.59 + `UTIL_MARGIN`), tool
+     calling on. Figures from `results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json`
+     (commit `27d99b6`, clean) unless noted:
+     - VRAM: **fits with 550 MiB headroom** (upper bound; sampled peak). That is 50 MiB above
+       the 500 MiB floor (derived). GPU after vLLM 5,637 MiB; Whisper large-v3 +1,599; peak
+       7,638. At its minimum 0.59 without tool calling: 726 MiB headroom
+       (`vram_Qwen3-4B-Instruct-2507-AWQ-4bit.json`, commit `c9d35d8`).
+     - vLLM uses more than its setting: +5,626 MiB measured against ≈ 4,995 MiB by the setting
+       (0.61 × 8,188; derived). The round trip peaked 402 MiB above the after-TTS reading
+       (derived); one short exchange, so the peak of a long call with a fuller KV cache is
+       **unverified**.
+     - KV cache (vLLM's log, **local only**): 0.76 GiB, 5,552 tokens, 1.36x concurrency at
+       max-model-len 4,096, so one call at a time. Weights 3.28 GiB.
+     - System RAM: peak 10,467 of 15,274 MiB.
+     - Tool calling: vLLM's hermes parser turns its tool calls into `tool_calls`; checked live
+       by `tests/test_llm_live.py` (a valid `check_slots` call; gpu-marked, not run in CI).
+     - Quality: its one Hindi round trip came back in Devanagari and grammatical, but said the
+       appointment "will be recorded" (`रिकॉर्ड कराया जाएगा`) rather than booked. One sample at
+       temperature 0 with a throwaway prompt, not an evaluation: Hindi quality is
+       **unverified** until the M3/M5 evals.
+     - Licence: Apache-2.0 (the quant's model card and the base model's LICENSE file; checked
+       2026-11-25), so commercial use is allowed. The quant repo has no LICENSE file of its
+       own.
+     - Risks: the 50 MiB margin over the floor is thin; a vLLM or driver update, a longer
+       max-model-len or a larger STT beam could push it under, so each needs a new
+       `make vram`. The build is a third-party quantization (cyankiwi, llm-compressor
+       W4A16), not an official Qwen release; its maturity is **unverified**.
+   - Cost: both are already downloaded and measured. What remains is a fair Hindi comparison,
+     which needs the M3/M5 evals.
 
 3. **Keep the 7B and Whisper on GPU, shrink the footprint.** Levers, with what is known:
    - `--enforce-eager` (CUDA graphs off): vLLM estimates 0.61 GiB (≈ 625 MiB) of graph memory.
