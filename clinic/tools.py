@@ -214,9 +214,9 @@ def book(conn: sqlite3.Connection, clock: Clock, req: BookIn) -> BookOut | ToolE
 def _booked(conn: sqlite3.Connection, appointment_id: int, replayed: bool) -> BookOut:
     row = conn.execute(
         """
-        SELECT a.slot_id, d.name, s.start, s.duration_min, p.name
+        SELECT a.slot_id, d.name, s.start, s.duration_min, a.patient_name
         FROM appointments a JOIN slots s ON s.id = a.slot_id
-        JOIN doctors d ON d.id = s.doctor_id JOIN patients p ON p.id = a.patient_id
+        JOIN doctors d ON d.id = s.doctor_id
         WHERE a.id = ?
         """,
         (appointment_id,),
@@ -237,14 +237,14 @@ def _booked(conn: sqlite3.Connection, appointment_id: int, replayed: bool) -> Bo
 def _book(conn: sqlite3.Connection, clock: Clock, req: BookIn) -> BookOut | ToolError:
     prior = conn.execute(
         """
-        SELECT a.id, a.slot_id, p.phone, a.status FROM appointments a
+        SELECT a.id, a.slot_id, p.phone, a.patient_name, a.status FROM appointments a
         JOIN patients p ON p.id = a.patient_id WHERE a.idempotency_key = ?
         """,
         (req.idempotency_key,),
     ).fetchone()
     if prior is not None:
-        appointment_id, slot_id, phone, status = prior
-        if (slot_id, phone, status) == (req.slot_id, req.phone, "booked"):
+        appointment_id, slot_id, phone, name, status = prior
+        if (slot_id, phone, name, status) == (req.slot_id, req.phone, req.patient_name, "booked"):
             return _booked(conn, appointment_id, replayed=True)
         return ToolError(
             code="idempotency_conflict",
@@ -271,10 +271,11 @@ def _book(conn: sqlite3.Connection, clock: Clock, req: BookIn) -> BookOut | Tool
         patient_id = patient[0]
     cursor = conn.execute(
         """
-        INSERT INTO appointments (slot_id, patient_id, status, idempotency_key, created_at)
-        VALUES (?, ?, 'booked', ?, ?)
+        INSERT INTO appointments
+            (slot_id, patient_id, patient_name, status, idempotency_key, created_at)
+        VALUES (?, ?, ?, 'booked', ?, ?)
         """,
-        (req.slot_id, patient_id, req.idempotency_key, to_db_time(clock.now())),
+        (req.slot_id, patient_id, req.patient_name, req.idempotency_key, to_db_time(clock.now())),
     )
     assert cursor.lastrowid is not None
     return _booked(conn, cursor.lastrowid, replayed=False)

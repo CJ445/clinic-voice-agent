@@ -35,9 +35,20 @@ def test_books_a_free_slot(conn: sqlite3.Connection, clock: FrozenClock) -> None
     assert isinstance(free, CheckSlotsOut) and FREE not in [s.slot_id for s in free.slots]
 
 
-def test_existing_patient_is_reused_by_phone(conn: sqlite3.Connection, clock: FrozenClock) -> None:
+def test_shared_phone_books_under_the_callers_name(
+    conn: sqlite3.Connection, clock: FrozenClock
+) -> None:
+    # Review #4 / Cyril option A: families share phones. Sunil books on Asha's number; the phone
+    # stays the patient key, but the appointment and the reply carry the name actually given.
     before = count(conn, "patients")
-    assert isinstance(book(conn, clock, req(phone="+91 98000 00001")), BookOut)  # Asha's number
+    out = book(conn, clock, req(phone="+91 98000 00001"))  # Asha's number
+    assert isinstance(out, BookOut) and out.patient_name == "Sunil Rao"
+    stored = conn.execute(
+        "SELECT a.patient_name, p.name FROM appointments a JOIN patients p ON p.id = a.patient_id"
+        " WHERE a.id = ?",
+        (out.appointment_id,),
+    ).fetchone()
+    assert stored == ("Sunil Rao", "Asha Verma")
     assert count(conn, "patients") == before
 
 
@@ -83,6 +94,12 @@ def test_retry_with_same_key_returns_the_same_appointment(
     [
         (lambda: req(slot_id="d1-20261130-1000"), "same key, different slot"),
         (lambda: req(phone="9000000009"), "same key, different patient"),
+        (
+            lambda: BookIn(
+                slot_id=FREE, patient_name="Other Name", phone="9876543210", idempotency_key="k-1"
+            ),
+            "same key, different name",
+        ),
     ],
 )
 def test_reused_key_with_different_details_conflicts(

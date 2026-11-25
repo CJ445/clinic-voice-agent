@@ -13,6 +13,8 @@ connection, whatever code is writing (concurrent writers are tested in M2.3):
   a blocked slot, and refuse blocking a slot that is booked. book() checks first so callers get
   a typed error; the triggers are the safety net for any other writer (Cyril, option 3).
 - every idempotency_key is unique, so a retried book() can find its first appointment.
+- the phone identifies a patient, but the name is stored per appointment: families share one
+  phone, so Sunil can book on Asha's number and be confirmed as Sunil (Cyril, option A).
 """
 
 import sqlite3
@@ -46,6 +48,7 @@ CREATE TABLE appointments (
     id               INTEGER PRIMARY KEY,
     slot_id          TEXT NOT NULL REFERENCES slots(id),
     patient_id       INTEGER NOT NULL REFERENCES patients(id),
+    patient_name     TEXT NOT NULL CHECK (length(trim(patient_name)) > 0),
     status           TEXT NOT NULL CHECK (status IN ('booked', 'cancelled')),
     idempotency_key  TEXT NOT NULL UNIQUE,
     created_at       TEXT NOT NULL CHECK (created_at GLOB {IST_TIME})

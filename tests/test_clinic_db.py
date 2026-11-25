@@ -19,8 +19,9 @@ INSERT_SLOT = (
     "INSERT INTO slots (id, doctor_id, start, duration_min, status) VALUES (?, 1, ?, 30, 'open')"
 )
 INSERT_APPT = (
-    "INSERT INTO appointments (id, slot_id, patient_id, status, idempotency_key, created_at)"
-    " VALUES (?, ?, ?, 'booked', ?, ?)"
+    "INSERT INTO appointments"
+    " (id, slot_id, patient_id, patient_name, status, idempotency_key, created_at)"
+    " VALUES (?, ?, ?, 'Asha', 'booked', ?, ?)"
 )
 
 
@@ -136,3 +137,13 @@ def test_blocking_is_allowed_once_the_appointment_is_cancelled(db: sqlite3.Conne
     book(db, 1, 1, "k1")
     db.execute("UPDATE appointments SET status = 'cancelled' WHERE id = 1")
     db.execute("UPDATE slots SET status = 'blocked' WHERE id = 's1'")
+
+
+@pytest.mark.parametrize("name", [None, "", "   "])
+def test_db_rejects_an_appointment_without_a_name(db: sqlite3.Connection, name: str | None) -> None:
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO appointments (slot_id, patient_id, patient_name, status, idempotency_key,"
+            " created_at) VALUES ('s1', 1, ?, 'booked', 'k', ?)",
+            (name, START),
+        )
