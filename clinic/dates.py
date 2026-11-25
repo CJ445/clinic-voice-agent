@@ -16,7 +16,8 @@ one reading. A bare weekday is the coming one; said on that same weekday, it is 
 "the 5th" / "5 tarikh" is the next 5th on or after today; if that month has no such day (the
 31st in November), it is ambiguous. A bare number is not a date: "5 baje" is a time.
 A bare kal/कल is tomorrow (a booking call is future context);
-kal with a past-tense marker (tha, gaya, था...) is ambiguous; कर, a common STT error for कल, is
+any past-tense marker (tha, gaya, था...) makes the sentence ambiguous, as do last/pichhle,
+no/nahi, raat (night) and month words (not parsed yet); कर, a common STT error for कल, is
 ambiguous unless another day word is present (then it is just "do", as in "book kar do").
 """
 
@@ -47,6 +48,9 @@ AmbiguousCode = Literal[
     "weekday_is_today",  # a bare weekday said on that weekday
     "not_a_day",  # "32nd"
     "no_such_day",  # "the 31st" in a 30-day month
+    "negated",  # kal nahi: a day the caller just turned down
+    "night",  # raat: "kal raat" is often last night, and the clinic is shut
+    "month_named",  # a month word: not parsed yet, so never guess the month
 ]
 
 
@@ -67,6 +71,59 @@ PAST_MARKERS = {
     *("tha", "thi", "gaya", "gayi", "gaye", "kiya", "kiye", "hua", "hui", "was", "were"),
     *("था", "थी", "थे", "गया", "गई", "गए", "किया", "हुआ", "हुई"),
 }  # romanised "the" (they were) is left out: it collides with English "the"
+LAST = {"last", "pichhle", "pichla", "pichli", "पिछले", "पिछला", "पिछली"}  # before a weekday
+NEGATION = {"nahi", "nahin", "nai", "not", "no", "नहीं", "नही"}  # not "na": a common filler
+NIGHT = {"raat", "rat", "night", "tonight", "रात"}
+# Month words aren't parsed yet; any of them makes the answer Ambiguous. No "may": English verb.
+MONTH_WORDS = set(
+    [
+        "january",
+        "february",
+        "march",
+        "april",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "sept",
+        "oct",
+        "nov",
+        "dec",
+        "month",
+        "mahina",
+        "mahine",
+        "जनवरी",
+        "फरवरी",
+        "फ़रवरी",
+        "मार्च",
+        "अप्रैल",
+        "मई",
+        "जून",
+        "जुलाई",
+        "अगस्त",
+        "सितंबर",
+        "सितम्बर",
+        "अक्टूबर",
+        "अक्तूबर",
+        "नवंबर",
+        "नवम्बर",
+        "दिसंबर",
+        "दिसम्बर",
+        "महीना",
+        "महीने",
+    ]
+)
 PARTS: dict[PartOfDay, set[str]] = {
     "morning": {"subah", "subha", "morning", "सुबह"},
     "afternoon": {"dopahar", "dopehar", "afternoon", "दोपहर"},
@@ -92,13 +149,17 @@ THIS = {"this", "is", "iss", "coming", "इस"}
 TARIKH = {"tarikh", "tareekh", "tarik", "तारीख", "तारिख"}  # "date", after a number
 ORDINAL = re.compile(r"(\d{1,2})(?:st|nd|rd|th)")
 DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
-WORD = re.compile(r"[0-9a-zऀ-ॿ]+")  # Latin, digits, and the whole Devanagari block
+# Latin, digits and Devanagari, except the danda । and double danda ॥ (U+0964/5), which are
+# punctuation: STT puts them right after a word ("था।").
+WORD = re.compile(r"[0-9a-z\u0900-\u0963\u0966-\u097f]+")
+ZERO_WIDTH = str.maketrans("", "", "\u200c\u200d")  # (non-)joiners can sit inside a word
 
 
 def words(text: str) -> list[str]:
     """Lower-cased words, punctuation dropped. Devanagari is NFC-normalised so that the same
     word typed or transcribed two ways compares equal."""
     text = unicodedata.normalize("NFC", text).lower().translate(DEVANAGARI_DIGITS)
+    text = text.translate(ZERO_WIDTH)
     text = re.sub(r"\bday after tomorrow\b", "parso", text)
     return WORD.findall(text)
 
@@ -108,6 +169,12 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
         raise ValueError("now must be timezone-aware")
     today = now.astimezone(IST).date()
     said = words(text)
+    if NEGATION.intersection(said):
+        return Ambiguous("negated", "the caller said no/nahi; ask which day they do want")
+    if NIGHT.intersection(said):
+        return Ambiguous("night", "night (raat) may mean last night; the clinic is shut at night")
+    if MONTH_WORDS.intersection(said):
+        return Ambiguous("month_named", "a month was named; confirm the full date")
 
     parts: list[PartOfDay] = [p for p, names in PARTS.items() if names.intersection(said)]
     if len(parts) > 1:
@@ -129,13 +196,7 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
             days.append(day)
         elif word in TODAY:
             days.append(today)
-        elif word in TOMORROW:
-            days.append(today + timedelta(days=1))
-        elif word in KAL:
-            if PAST_MARKERS.intersection(said):
-                return Ambiguous(
-                    "past", "kal in the past tense means yesterday, which is past; ask which day"
-                )
+        elif word in TOMORROW or word in KAL:
             days.append(today + timedelta(days=1))
         elif word in DAY_AFTER:
             days.append(today + timedelta(days=2))
@@ -148,6 +209,8 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
                 "heard_kar", "heard 'कर', which may be 'कल' (tomorrow); ask to confirm the day"
             )
         return Ambiguous("no_day", "no day mentioned; ask which day")
+    if PAST_MARKERS.intersection(said):  # "kal gaya tha" = yesterday; "Friday ko gaya tha"
+        return Ambiguous("past", "the sentence is in the past tense; ask which day to book")
     distinct = sorted(set(days))
     if len(distinct) > 1:
         return Ambiguous("two_days", "more than one day mentioned; ask which one", tuple(distinct))
@@ -157,6 +220,8 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
 def weekday(number: int, before: str, today: date) -> date | Ambiguous:
     """The date a weekday name means, given the word before it (next/agle, this/is, or none)."""
     ahead = (number - today.weekday()) % 7  # 0 when it is that weekday today
+    if before in LAST:
+        return Ambiguous("past", "'last' names a past day; ask which day to book")
     if before in THIS:
         return today + timedelta(days=ahead)
     coming = today + timedelta(days=ahead or 7)

@@ -139,9 +139,42 @@ def test_days_of_month(text: str, now: datetime, expected: str) -> None:
     check(text, expected, now)
 
 
+NOV2 = datetime(2026, 11, 2, 10, 0, tzinfo=IST)
+
+# Review must-fix 2-5, #11, #12: each of these used to come back as a confident wrong date.
+NOT_A_PLAIN_DAY = [
+    ("कल आया था।", MON, "ambiguous: past"),  # danda glued to था hid the past tense
+    ("कल शाम।", MON, "2026-12-01 evening"),
+    ("आज शाम।", MON, "2026-11-30 evening"),
+    ("कल शा\u200cम", MON, "2026-12-01 evening"),  # zero-width non-joiner inside a word
+    ("kal nahi", MON, "ambiguous: negated"),
+    ("not tomorrow", MON, "ambiguous: negated"),
+    ("कल नहीं, परसों", MON, "ambiguous: negated"),
+    ("Friday ko gaya tha", MON, "ambiguous: past"),
+    ("aaj subah call kiya tha", MON, "ambiguous: past"),
+    ("last Friday", MON, "ambiguous: past"),
+    ("pichhle shukravar", MON, "ambiguous: past"),
+    ("पिछले शुक्रवार", MON, "ambiguous: past"),
+    ("kal raat", MON, "ambiguous: night"),  # often "last night"; and the clinic is shut
+    ("आज रात", MON, "ambiguous: night"),
+    ("tonight", MON, "ambiguous: night"),
+    ("the 5th of January", MON, "ambiguous: month_named"),
+    ("10th Jan", MON, "ambiguous: month_named"),
+    ("5 tarikh agle mahine", NOV2, "ambiguous: month_named"),
+    ("दिसंबर 5 तारीख", MON, "ambiguous: month_named"),
+    ("may I come kal", MON, "2026-12-01"),  # "may" is not read as a month
+    ("kiya kal slot hai", MON, "ambiguous: past"),  # STT "kiya" for kya: safe, costs a question
+]
+
+
+@pytest.mark.parametrize(("text", "now", "expected"), NOT_A_PLAIN_DAY)
+def test_not_a_plain_day(text: str, now: datetime, expected: str) -> None:
+    check(text, expected, now)
+
+
 def test_the_table_has_at_least_40_cases() -> None:
     # PLAN M2.4 exit: >= 40 table cases incl. Hinglish and ambiguous ones.
-    table = RELATIVE_DAYS + AMBIGUOUS_RELATIVE + WEEKDAYS + DAYS_OF_MONTH
+    table = RELATIVE_DAYS + AMBIGUOUS_RELATIVE + WEEKDAYS + DAYS_OF_MONTH + NOT_A_PLAIN_DAY
     ambiguous = [row for row in table if row[-1].startswith("ambiguous")]
     assert len(table) >= 40 and len(ambiguous) >= 10
 
@@ -165,3 +198,16 @@ def test_now_is_read_in_ist() -> None:
 def test_naive_now_is_refused() -> None:
     with pytest.raises(ValueError, match="aware"):
         resolve("aaj", datetime(2026, 11, 30, 8, 0))  # noqa: DTZ001
+
+
+def test_every_word_list_is_nfc() -> None:
+    # Input is NFC-normalised; a list word typed another way (e.g. precomposed फ़) never matches.
+    import unicodedata
+
+    from clinic import dates
+
+    lists = [value for value in vars(dates).values() if isinstance(value, set)]
+    lists += [set(dates.WEEKDAYS), *dates.PARTS.values()]
+    assert len(lists) > 10
+    for word in set().union(*lists):
+        assert unicodedata.normalize("NFC", word) == word, word
