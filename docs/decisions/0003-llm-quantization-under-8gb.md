@@ -25,7 +25,7 @@ identical); the derivation below uses the larger.
 | GPU MiB after vLLM | 3,653 | 7,139 |
 | Room left for STT | 4,535 | 1,049 |
 | Whisper large-v3 load | +1,599 | **out of memory** (`RuntimeError: CUDA failed with error out of memory`) |
-| Peak GPU MiB / headroom | 5,336 / **2,852 — fits** | 7,234 / `null` (no STT loaded) — **does not fit** |
+| Peak GPU MiB / headroom | 5,336 / **2,758 — fits** (conservative: lowest across two runs; this run 2,852) | 7,234 / `null` (no STT loaded) — **does not fit** |
 | Peak system RAM (of 15,274 MiB) | 8,955 | 8,600 (STT never loaded) |
 | Round trip | completed | not reached |
 | Licence | Qwen Research License — research/evaluation only, **non-commercial** | Apache-2.0 |
@@ -71,7 +71,7 @@ larger measured inference peak (5,430 − 5,252 = +178 MiB, at `4c1d4cc`) as a s
      STT latency run.
 
 2. **A 3–4B LLM instead of the 7B (the Qwen 3B, or another model of that size).**
-   - VRAM: measured for the Qwen 3B: fits with 2,852 MiB headroom (upper bound), leaving room for a larger
+   - VRAM: measured for the Qwen 3B: fits with 2,758 MiB headroom (conservative upper bound), leaving room for a larger
      KV cache or a second STT pass.
    - Quality: the Qwen 3B's one Hindi sample was unusable (see Context). Other 3–4B instruct
      models with AWQ builds and Hindi ability are **unverified**: none has been tried here.
@@ -117,4 +117,5 @@ TODO(Cyril)
 - `results/published/min_util_Qwen2.5-3B-Instruct-AWQ.json`, `results/published/min_util_Qwen2.5-7B-Instruct-AWQ.json`
   — commit `0a764e5`, clean tree, every trial.
 - vLLM logs `results/vllm_Qwen2.5-*-AWQ_u*.log` (gitignored; local only).
-- Licences: model cards at the pinned revisions (`3559b226e8`, `b25037543e`), checked 2026-11-25.
+- Licences: model cards at the pinned revisions (`3559b226e8ce77211e2c1bd7ddfb7686fec4d6dd`,
+  `b25037543e9394b818fdfca67ab2a00ecc7dd641`), checked 2026-11-25.
