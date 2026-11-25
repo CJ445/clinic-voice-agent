@@ -1,7 +1,7 @@
 """Table tests for clinic.dates.resolve (PLAN M2.4): English, Devanagari Hindi and Hinglish.
 
 Each row is (what the caller said, what resolve must return). "2026-12-01 evening" means one
-day plus a part of day; "ambiguous: <word>" means an Ambiguous whose reason contains <word>.
+day plus a part of day; "ambiguous: <code>" means an Ambiguous with exactly that code.
 Unless a row says otherwise, now is MON = Monday 30 Nov 2026, 08:00 IST.
 """
 
@@ -17,7 +17,8 @@ MON = datetime(2026, 11, 30, 8, 0, tzinfo=IST)
 
 def show(result: Resolved | Ambiguous) -> str:
     if isinstance(result, Ambiguous):
-        return f"ambiguous: {result.reason}"
+        assert result.reason, "every Ambiguous carries a reason the agent can use"
+        return f"ambiguous: {result.code}"
     assert result.date_from == result.date_to  # single days only, so far
     day = result.date_from.isoformat()
     return f"{day} {result.part_of_day}" if result.part_of_day else day
@@ -44,16 +45,16 @@ RELATIVE_DAYS = [
 ]
 
 AMBIGUOUS_RELATIVE = [
-    ("कर", "ambiguous: कल"),  # STT error for कल: never guess tomorrow from it
-    ("कर शाम को", "ambiguous: कल"),
+    ("कर", "ambiguous: heard_kar"),  # STT error for कल: never guess tomorrow from it
+    ("कर शाम को", "ambiguous: heard_kar"),
     ("kal gaya tha", "ambiguous: past"),  # kal with past tense = yesterday, not bookable
     ("कल आया था", "ambiguous: past"),
     ("yesterday", "ambiguous: past"),
-    ("aaj ya kal", "ambiguous: more than one day"),
-    ("kal parso", "ambiguous: more than one day"),  # idiom: "in a day or two"
-    ("shaam ko", "ambiguous: no day"),
-    ("", "ambiguous: no day"),
-    ("kal subah ya shaam", "ambiguous: more than one part of the day"),
+    ("aaj ya kal", "ambiguous: two_days"),
+    ("kal parso", "ambiguous: two_days"),  # idiom: "in a day or two"
+    ("shaam ko", "ambiguous: no_day"),
+    ("", "ambiguous: no_day"),
+    ("kal subah ya shaam", "ambiguous: two_parts"),
 ]
 
 
@@ -82,13 +83,13 @@ WEEKDAYS = [
     ("next Friday", FRI, "2026-12-11"),
     ("agle budhvar", FRI, "2026-12-09"),
     ("kal mangalvar", MON, "2026-12-01"),  # two day words, same day: fine
-    ("next Friday", MON, "ambiguous: this week's"),  # Cyril: in-week "next" -> ask
-    ("agle shukravar", MON, "ambiguous: this week's"),
-    ("अगले शुक्रवार", MON, "ambiguous: this week's"),
-    ("next Saturday", FRI, "ambiguous: this week's"),
-    ("Monday", MON, "ambiguous: today"),  # bare weekday said on that weekday
-    ("kal friday", MON, "ambiguous: more than one day"),
-    ("agle hafte", MON, "ambiguous: no day"),  # "next week" names no day
+    ("next Friday", MON, "ambiguous: which_week"),  # Cyril: in-week "next" -> ask
+    ("agle shukravar", MON, "ambiguous: which_week"),
+    ("अगले शुक्रवार", MON, "ambiguous: which_week"),
+    ("next Saturday", FRI, "ambiguous: which_week"),
+    ("Monday", MON, "ambiguous: weekday_is_today"),  # bare weekday said on that weekday
+    ("kal friday", MON, "ambiguous: two_days"),
+    ("agle hafte", MON, "ambiguous: no_day"),  # "next week" names no day
     ("sun lijiye, kal shaam", MON, "2026-12-01 evening"),  # "sun" = listen, not Sunday
     ("kal sat baje", MON, "2026-12-01"),  # "sat" = seven (saat), not Saturday
 ]
@@ -124,12 +125,12 @@ DAYS_OF_MONTH = [
     ("friday the 4th", MON, "2026-12-04"),  # weekday and date agree
     ("the 1st, kal", MON, "2026-12-01"),
     ("kal 5 baje", MON, "2026-12-01"),  # a bare number is a time, not a date
-    ("the 31st", MON, "ambiguous: no day 31"),  # November has no 31st
-    ("the 30th", JAN31, "ambiguous: no day 30"),  # February has no 30th
-    ("32nd", MON, "ambiguous: not a day of the month"),
-    ("0 tarikh", MON, "ambiguous: not a day of the month"),
-    ("friday the 5th", MON, "ambiguous: more than one day"),
-    ("5 baje", MON, "ambiguous: no day"),
+    ("the 31st", MON, "ambiguous: no_such_day"),  # November has no 31st
+    ("the 30th", JAN31, "ambiguous: no_such_day"),  # February has no 30th
+    ("32nd", MON, "ambiguous: not_a_day"),
+    ("0 tarikh", MON, "ambiguous: not_a_day"),
+    ("friday the 5th", MON, "ambiguous: two_days"),
+    ("5 baje", MON, "ambiguous: no_day"),
 ]
 
 
@@ -146,12 +147,7 @@ def test_the_table_has_at_least_40_cases() -> None:
 
 
 def check(text: str, expected: str, now: datetime = MON) -> None:
-    got = show(resolve(text, now))
-    if expected.startswith("ambiguous: "):
-        assert got.startswith("ambiguous: "), got
-        assert expected.removeprefix("ambiguous: ") in got, got
-    else:
-        assert got == expected
+    assert show(resolve(text, now)) == expected
 
 
 @pytest.mark.parametrize(("text", "expected"), RELATIVE_DAYS + AMBIGUOUS_RELATIVE)

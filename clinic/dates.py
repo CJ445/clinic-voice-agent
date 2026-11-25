@@ -24,6 +24,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Literal
 
 from clinic.clock import IST
 from clinic.tools import PartOfDay
@@ -36,8 +37,22 @@ class Resolved:
     part_of_day: PartOfDay | None = None
 
 
+AmbiguousCode = Literal[
+    "no_day",  # no day word at all
+    "two_days",  # two day expressions naming different days
+    "two_parts",  # e.g. subah ya shaam
+    "past",  # yesterday, or kal in the past tense
+    "heard_kar",  # कर: maybe an STT error for कल
+    "which_week",  # "next Friday" while this week still has a Friday
+    "weekday_is_today",  # a bare weekday said on that weekday
+    "not_a_day",  # "32nd"
+    "no_such_day",  # "the 31st" in a 30-day month
+]
+
+
 @dataclass(frozen=True)
 class Ambiguous:
+    code: AmbiguousCode  # for code and tests
     reason: str  # said to the agent, which asks the caller
     candidates: tuple[date, ...] = ()  # the readings, when there are a few
 
@@ -96,7 +111,7 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
 
     parts: list[PartOfDay] = [p for p, names in PARTS.items() if names.intersection(said)]
     if len(parts) > 1:
-        return Ambiguous(f"more than one part of the day: {' or '.join(parts)}")
+        return Ambiguous("two_parts", f"more than one part of the day: {' or '.join(parts)}")
     part = parts[0] if parts else None
 
     days: list[date] = []  # one entry per day expression the caller used
@@ -119,21 +134,23 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
         elif word in KAL:
             if PAST_MARKERS.intersection(said):
                 return Ambiguous(
-                    "kal in the past tense means yesterday, which is past; ask which day"
+                    "past", "kal in the past tense means yesterday, which is past; ask which day"
                 )
             days.append(today + timedelta(days=1))
         elif word in DAY_AFTER:
             days.append(today + timedelta(days=2))
         elif word in YESTERDAY:
-            return Ambiguous("yesterday is in the past; ask which day")
+            return Ambiguous("past", "yesterday is in the past; ask which day")
 
     if not days:
         if STT_KAL.intersection(said):
-            return Ambiguous("heard 'कर', which may be 'कल' (tomorrow); ask to confirm the day")
-        return Ambiguous("no day mentioned; ask which day")
+            return Ambiguous(
+                "heard_kar", "heard 'कर', which may be 'कल' (tomorrow); ask to confirm the day"
+            )
+        return Ambiguous("no_day", "no day mentioned; ask which day")
     distinct = sorted(set(days))
     if len(distinct) > 1:
-        return Ambiguous("more than one day mentioned; ask which one", tuple(distinct))
+        return Ambiguous("two_days", "more than one day mentioned; ask which one", tuple(distinct))
     return Resolved(distinct[0], distinct[0], part)
 
 
@@ -147,12 +164,16 @@ def weekday(number: int, before: str, today: date) -> date | Ambiguous:
         if number > today.weekday():  # that weekday is still ahead this week
             later = coming + timedelta(days=7)
             return Ambiguous(
-                "'next' can mean this week's or next week's; ask which", (coming, later)
+                "which_week",
+                "'next' can mean this week's or next week's; ask which",
+                (coming, later),
             )
         return coming
     if ahead == 0:
         return Ambiguous(
-            "that weekday is today; ask if they mean today or next week", (today, coming)
+            "weekday_is_today",
+            "that weekday is today; ask if they mean today or next week",
+            (today, coming),
         )
     return coming
 
@@ -170,11 +191,11 @@ def day_number(said: list[str], i: int) -> int | None:
 def day_of_month(number: int, today: date) -> date | Ambiguous:
     """The next date on or after today that falls on day `number` of its month."""
     if not 1 <= number <= 31:
-        return Ambiguous(f"{number} is not a day of the month; ask which date")
+        return Ambiguous("not_a_day", f"{number} is not a day of the month; ask which date")
     year, month = today.year, today.month
     if number < today.day:  # passed this month: next month
         year, month = (year + 1, 1) if month == 12 else (year, month + 1)
     try:
         return date(year, month, number)
     except ValueError:
-        return Ambiguous(f"that month has no day {number}; ask which date")
+        return Ambiguous("no_such_day", f"that month has no day {number}; ask which date")
