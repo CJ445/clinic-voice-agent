@@ -55,7 +55,7 @@ models fit with ≥ 500 MiB headroom, or an ADR records the fallback (smaller LL
 
 ## M3 — Agent, text mode (day 3–5)
 
-- [ ] M3.1 vLLM serve script + health check; OpenAI client wrapper with timeouts
+- [x] M3.1 vLLM serve script + health check; OpenAI client wrapper with timeouts
 - [ ] M3.2 LangGraph: one LLM node with tools + guard nodes (confirm-before-mutate, slot-grounding)
 - [ ] M3.3 Text REPL `python -m agent.cli` for manual calls
 - [ ] M3.4 20 hand-written golden conversations as pytest (text mode)
