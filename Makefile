@@ -16,8 +16,10 @@ format:
 types:
 	uv run pyright
 
+# One pass: unit tests plus the M2 exit criterion, clinic/tools.py 100% branch-covered.
 test:
-	uv run pytest -q -m "not gpu"
+	uv run pytest -q -m "not gpu" --cov=clinic.tools --cov-branch \
+		--cov-report=term-missing:skip-covered --cov-fail-under=100
 
 # Gate G1 — must pass before every commit
 check: lint types test
