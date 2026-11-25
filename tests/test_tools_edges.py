@@ -12,13 +12,13 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from clinic.clock import IST, FrozenClock
+from clinic.clock import IST, Clock, FrozenClock
 from clinic.db import connect
 from clinic.seed import SEED_NOW, build
 from clinic.tools import (
@@ -54,58 +54,112 @@ def booked_on(path: Path, slot_id: str) -> int:
         return conn.execute(query, (slot_id,)).fetchone()[0]
 
 
+BARRIER_TIMEOUT_S = 30  # generous for a slow CI runner; only reached if a worker is stuck
+
+
 def race_threads(path: Path, calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Run each book call on its own thread and connection, all released at once."""
-    barrier = threading.Barrier(len(calls))
+    """Run each book call on its own thread and connection, released together by a barrier."""
+    barrier = threading.Barrier(len(calls), timeout=BARRIER_TIMEOUT_S)
     results: list[dict[str, Any]] = [{} for _ in calls]
+    errors: list[BaseException] = []
 
     def worker(i: int) -> None:
-        conn = connect(path)
-        barrier.wait()
-        results[i] = run(conn, FrozenClock(SEED_NOW), "book", calls[i])
-        conn.close()
+        try:
+            conn = connect(path)
+            barrier.wait()  # raises BrokenBarrierError unless all N threads arrive
+            results[i] = run(conn, FrozenClock(SEED_NOW), "book", calls[i])
+            conn.close()
+        except BaseException as exc:  # re-raised below on the test's thread
+            errors.append(exc)
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(len(calls))]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
+    assert errors == [], f"a worker failed or never reached the barrier: {errors!r}"
+    assert all(results), "a worker returned no result"
     return results
 
 
-# A separate Python process per writer: imports, waits for a shared start time, books once.
+# A separate Python process per writer. It imports and connects, says it is ready, waits for
+# the go signal, books once. Flag files are the barrier: nothing starts until all N are ready.
 WORKER = """
-import json, sys, time
+import json, os, sys, time
 from clinic.clock import FrozenClock
 from clinic.db import connect
 from clinic.seed import SEED_NOW
 from clinic.tools import run
-path, start_at, call = sys.argv[1], float(sys.argv[2]), json.loads(sys.argv[3])
+path, flags, index, call = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
 conn = connect(path)
-while time.time() < start_at:
-    pass
+open(os.path.join(flags, "ready-" + index), "w").close()
+go, deadline = os.path.join(flags, "go"), time.monotonic() + float(sys.argv[5])
+while not os.path.exists(go):
+    if time.monotonic() > deadline:
+        sys.exit("worker " + index + ": never released")
+    time.sleep(0.0005)  # poll, don't spin a core
 print(json.dumps(run(conn, FrozenClock(SEED_NOW), "book", call)))
 """
 
 
 def race_processes(path: Path, calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    start_at = str(time.time() + 3)  # time for every process to import before the race
+    flags = path.parent / "flags"
+    flags.mkdir()
     procs = [
         subprocess.Popen(
-            [sys.executable, "-c", WORKER, str(path), start_at, json.dumps(call)],
+            [sys.executable, "-c", WORKER, str(path), str(flags), str(i), json.dumps(call)]
+            + [str(BARRIER_TIMEOUT_S)],
             cwd=REPO,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
-        for call in calls
+        for i, call in enumerate(calls)
     ]
+    deadline = time.monotonic() + BARRIER_TIMEOUT_S
+    while len(list(flags.glob("ready-*"))) < len(calls) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    ready = len(list(flags.glob("ready-*")))
+    if ready < len(calls):
+        for proc in procs:
+            proc.kill()
+        pytest.fail(f"only {ready}/{len(calls)} workers reached the barrier")
+    (flags / "go").touch()
     results = []
     for proc in procs:
         out, err = proc.communicate(timeout=60)
         assert proc.returncode == 0, err
         results.append(json.loads(out))
     return results
+
+
+def test_a_worker_that_never_reaches_the_barrier_fails_the_race(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A degraded race (fewer than N writers actually racing) must fail, not silently pass.
+    this_module = sys.modules[__name__]
+    build(tmp_path / "c.db")
+    monkeypatch.setattr(this_module, "BARRIER_TIMEOUT_S", 1)
+
+    opened, real_connect = [], connect
+
+    def first_connect_fails(db_path: Path) -> sqlite3.Connection:
+        opened.append(db_path)
+        if len(opened) == 1:
+            raise OSError("worker 0 could not open the DB")
+        return real_connect(db_path)
+
+    monkeypatch.setattr(this_module, "connect", first_connect_fails)
+    with pytest.raises(AssertionError, match="never reached the barrier") as failed:
+        race_threads(tmp_path / "c.db", [args(i) for i in range(3)])
+    # Worker 0's OSError, then the two healthy workers' barrier timeouts; nothing else.
+    message = str(failed.value).splitlines()[0]  # pytest appends its own diff below
+    assert message.count("OSError") == 1 and message.count("BrokenBarrierError") == 2
+
+    worker_0_dies_early = "import sys\nif sys.argv[3] == '0':\n    sys.exit(1)\n" + WORKER
+    monkeypatch.setattr(this_module, "WORKER", worker_0_dies_early)
+    with pytest.raises(pytest.fail.Exception, match="only 2/3 workers reached the barrier"):
+        race_processes(tmp_path / "c.db", [args(i) for i in range(3)])
 
 
 @pytest.mark.parametrize("race", [race_threads, race_processes])
@@ -167,7 +221,8 @@ def test_slot_is_past_at_the_instant_it_starts(conn: sqlite3.Connection) -> None
 
 def test_cancel_is_refused_at_the_instant_the_appointment_starts(conn: sqlite3.Connection) -> None:
     asha = CancelIn(appointment_id=1, phone="9800000001")  # seed: 09:00
-    assert isinstance(cancel(conn, at(9, 0), asha), ToolError)
+    refused = cancel(conn, at(9, 0), asha)
+    assert isinstance(refused, ToolError) and refused.code == "past_slot"
     assert isinstance(cancel(conn, at(8, 59, 59), asha), CancelOut)
 
 
@@ -187,12 +242,22 @@ def night_conn(conn: sqlite3.Connection) -> sqlite3.Connection:
     return conn
 
 
-def utc_clock(hour: int, minute: int) -> FrozenClock:
+class UtcClock:
+    """Reports UTC as-is. FrozenClock converts to IST itself, so it can't test the tools' side."""
+
+    def __init__(self, hour: int, minute: int) -> None:
+        self._at = datetime(2026, 12, 1, hour, minute, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        return self._at
+
+
+def utc_clock(hour: int, minute: int) -> Clock:
     """A clock that reports UTC on 1 Dec (IST is UTC+05:30)."""
-    return FrozenClock(datetime(2026, 12, 1, hour, minute, tzinfo=UTC))
+    return UtcClock(hour, minute)
 
 
-def slot_ids(conn: sqlite3.Connection, clock: FrozenClock, day: date) -> list[str]:
+def slot_ids(conn: sqlite3.Connection, clock: Clock, day: date) -> list[str]:
     out = check_slots(
         conn, clock, CheckSlotsIn(doctor="Sharma", date_from=day, date_to=day, max_results=50)
     )
@@ -214,6 +279,7 @@ def test_midnight_ist_slot_belongs_to_the_next_ist_day(night_conn: sqlite3.Conne
 def test_clock_in_utc_is_read_as_ist(night_conn: sqlite3.Connection) -> None:
     # 18:15 UTC = 23:45 IST on 1 Dec: the 23:30 slot has started, the 00:00 slot hasn't.
     clock = utc_clock(18, 15)
+    assert clock.now().utcoffset() == timedelta(0)  # the tools really see UTC
     assert LATE not in slot_ids(night_conn, clock, date(2026, 12, 1))
     assert slot_ids(night_conn, clock, date(2026, 12, 2))[0] == MIDNIGHT
     late = book(night_conn, clock, BookIn.model_validate(args(1, slot_id=LATE)))
@@ -235,10 +301,8 @@ def test_cancel_nonexistent_and_twice_by_phone_and_slot(conn: sqlite3.Connection
     clock = FrozenClock(SEED_NOW)
     ravi = CancelIn(phone="9800000002", slot_id="d1-20261130-1730")
     nobody = CancelIn(phone="9800000002", slot_id=FREE)
-    assert (
-        isinstance(missing := cancel(conn, clock, nobody), ToolError)
-        and missing.code == "not_found"
-    )
+    missing = cancel(conn, clock, nobody)
+    assert isinstance(missing, ToolError) and missing.code == "not_found"
     assert isinstance(cancel(conn, clock, ravi), CancelOut)
     again = cancel(conn, clock, ravi)
     assert isinstance(again, ToolError) and again.code == "already_cancelled"
