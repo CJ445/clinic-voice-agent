@@ -45,6 +45,9 @@ SYSTEM = "You are a clinic receptionist. Reply in one short Hindi sentence, in D
 GPU_QUERY = "--query-gpu=name,memory.total,memory.used,driver_version"
 APPS_QUERY = "--query-compute-apps=pid,used_memory"
 CSV = "--format=csv,noheader,nounits"
+# Review #2: spikes shorter than one interval can be missed, so the peak is a lower bound and
+# headroom an upper bound. Stated in every record.
+SAMPLE_INTERVAL_S = 1.0
 
 
 def sh(*cmd: str) -> str:
@@ -175,7 +178,7 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
     transcript, reply, reply_samples, error = "", "", 0, None
     proc = vllm_server.start(repo, revision, float(util), log)
     try:
-        with Peaks(lambda: (gpu_used_mib(), ram_mib()[1])) as peaks:
+        with Peaks(lambda: (gpu_used_mib(), ram_mib()[1]), SAMPLE_INTERVAL_S) as peaks:
             # A model set that does not fit (e.g. STT out of memory) is a result, not a crash:
             # record how far it got and the error, so ADR-0003 sees every option.
             try:
@@ -264,6 +267,11 @@ def main() -> None:
         "total_mib": gpu.total_mib,
         "ram_total_mib": ram_mib()[0],
         "min_headroom_mib": MIN_HEADROOM_MIB,
+        "sampling": {
+            "interval_s": SAMPLE_INTERVAL_S,
+            "note": "peak_used is sampled, so spikes shorter than interval_s can be missed: "
+            "headroom is an upper bound",
+        },
         "runs": runs,
     }
     check_record(record, home=str(Path.home()))
