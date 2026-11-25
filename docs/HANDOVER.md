@@ -7,6 +7,30 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ## 2026-11-25 — session 2, M2 (in progress)
 
+- **M2.4** (branch `m2/dates`): `7c9d870` aaj/kal/parso + parts of day → `f20dae4` weekdays →
+  `580bf7f` drop "sun"/"sat" → `dee3ceb` day of month → review fixes `7733a68` (typed
+  `Ambiguous.code`), `d732503` (must-fix 2–5, #11, #12), `e675fdd` (#1, #6, #7, #10), `835bb82`
+  (#8). Table: 122 rows, 50 ambiguous (counted by script). **`dee3ceb`'s body says "31
+  ambiguous"; it was 23 at that commit**, a number typed before counting.
+- **Cyril's M2.4 rulings** (from his answers in this session; all in the `clinic/dates.py`
+  docstring, marked *): in-week "next X" ambiguous; bare kal = tomorrow; "the 5th" = next on or
+  after today; "agle hafte X" = X next week; "next ..." on a Sunday ambiguous; aaj/kal/tomorrow
+  ambiguous 00:00–04:00 IST.
+- **Question for Cyril:** the after-midnight ruling named aaj/kal/tomorrow. `parso` at 00:30 still
+  uses the calendar rule (pinned by a row). Same treatment, or keep?
+- **M2.4 `/review` log** (fixed: must-fix 1–5, #6, #7, #8, #10, #11, #12, substring reason
+  matching; the rest is logged here, not discussed):
+  - #9: "aaj subah" said at 21:00 resolves to a morning that has passed; the M2.3 past-slot check
+    stops the booking, but the agent will say "no slots" instead of asking.
+  - Not parsed (all come back Ambiguous or no_day, so safe): month names, number words ("paanch
+    tarikh"), "is hafte X", weekdays in the 00:00–04:00 window.
+  - Rows that pass partly by coincidence of `now`: "kal mangalvar", "the 1st, kal".
+  - "kiya" (STT for kya) makes a sentence past tense: safe, costs a question (pinned by a row).
+  - The ordinal regex accepts "5st"/"11st"; the WEEKDAYS loop leaves `number`/`names` as module
+    globals.
+  - `clinic/dates.py` is 100% branch-covered by its tests but not in the coverage gate (`make test`
+    gates `clinic/tools.py` only).
+
 - **M2.3** (branch `m2/edge-tests`): `7bc647b` pytest-cov → `806c695` edge-case tests →
   `90da458` `make cov` → `5c7b8b0` start barrier + review fixes → `c8bbefa` coverage folded into
   `make test` (Cyril) → `999adf4` CLAUDE.md rule 1 (Cyril). `806c695` is 263 lines of tests; its
