@@ -126,3 +126,20 @@ def test_stop_cannot_be_interrupted_by_a_second_ctrl_c(monkeypatch: pytest.Monke
     serve.stop_uninterruptibly(object())  # type: ignore[arg-type]
     assert seen == [signal.SIG_IGN, signal.SIG_IGN]
     assert (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)) == before
+
+
+@pytest.mark.parametrize("util", [0.0, -0.1, 0.96, 5.0])
+def test_util_out_of_range_is_refused(tmp_path: Path, util: float) -> None:
+    # Review #8, Cyril: 0 < util <= 0.95, so `--util 5` fails here, not deep in vLLM's startup.
+    with pytest.raises(ValueError, match="0.95"):
+        serve.choose_util(REPO, FULL, override=util, records=tmp_path)
+
+
+def test_util_at_the_cap_is_accepted(tmp_path: Path) -> None:
+    assert serve.choose_util(REPO, FULL, override=serve.MAX_UTIL, records=tmp_path).util == 0.95
+
+
+def test_measured_plus_margin_is_also_capped(tmp_path: Path) -> None:
+    write_record(tmp_path, "a", REPO, FULL[:10], 0.94)
+    with pytest.raises(ValueError, match="0.95"):
+        serve.choose_util(REPO, FULL, override=None, records=tmp_path)
