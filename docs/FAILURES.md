@@ -24,7 +24,7 @@ Interview gold. One entry per real problem. Be specific: symptoms, numbers, wron
 - **Fix:** (Cyril chose option B over `apt install python3.11-dev`) `python-preference =
   "only-managed"` under `[tool.uv]`, `uv python install 3.11` (installed 3.11.15), venv rebuilt
   in place with `uv sync --locked --group gpu --offline` from uv's cache (no re-download).
-  Commit: *pending*.
+  Commit: `7a5bb24`.
 - **Guard added:** (1) `tests/test_env.py::test_python_dev_headers_present` asserts `Python.h`
   exists for the running interpreter. It is in `make check`, so G1 catches it locally and in CI
   (a `make setup` check was considered, but CI never runs `make setup`). Checked: it reports

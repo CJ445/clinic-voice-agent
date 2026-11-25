@@ -5,6 +5,74 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ---
 
+## 2026-11-25 — session 2 (M0.3)
+
+- **Milestone / task:** M0.3 GPU co-residency smoke test (branch `m0/gpu-smoke`, not pushed)
+- **Done:**
+  - Commits `c97ca54` gpu dependency group (vLLM 0.19.1, faster-whisper) → `270dd1b`
+    nvidia-smi/headroom helpers + tests → `e96bfb6` vLLM server wrapper → `0fa62b1`
+    pocket-tts pinned git commit → `ac4319e` `make vram` → `7a5bb24` uv-managed Python (F-001)
+    + `tests/test_env.py` guard → `c99518d` concurrency-line parser → `0a764e5`
+    min-utilization search → `4c1d4cc` record a set that doesn't fit instead of crashing.
+  - **Minimum utilization** (`python -m bench.min_util`, commit `0a764e5`, clean;
+    `results/min_util_*.json`, local only): Qwen2.5-3B-Instruct-AWQ **0.36**, Qwen2.5-7B-
+    Instruct-AWQ **0.80**. Rule: vLLM ready and ≥ 1x concurrency at max-model-len 4096, CUDA
+    graphs on. Every trial is in the JSON.
+  - **Co-residency** (`results/published/vram.json`, commit `4c1d4cc`, clean; command in the
+    file): 3B + Whisper large-v3 `int8_float16` beam 5 + Indus Pocket TTS (CPU, +0 MiB)
+    **fits, 2,758 MiB headroom**, round trip completed. 7B: Whisper **out of memory** after
+    vLLM left 1,049 MiB; recorded as `"fits": false`. Checked: no home path or username in it.
+  - **ADR-0003 drafted** (`docs/decisions/0003-llm-quantization-under-8gb.md`, status
+    proposed): three options with measured vs unverified marked; Decision is `TODO(Cyril)`.
+  - **NeMo dry-run** (not added to `uv.lock`, per Cyril): `nemo-toolkit` 3.0.0 resolves
+    alongside vLLM 0.19.1; torch stays 2.10.0, 0 cu13 packages. It would change transformers
+    5.24.0→5.24.1, fsspec 2026.9.0→2025.12.0, packaging 26.4→24.2, and add 66 packages.
+    No conflict, so no ADR-0002 notes needed. **Unverified:** whether IndicConformer needs
+    AI4Bharat's NeMo fork or an ONNX build instead of stock NeMo.
+  - **TTS:** Indus Pocket TTS works on CPU (`torch.cuda.is_initialized()` False); Whisper
+    transcribed its Hindi output close to the prompt, so Piper fallback not needed.
+- **In progress (exact state):** uncommitted: ADR-0003 draft, `results/published/vram.json`,
+  this entry, the PLAN tick. They form the docs commit once Cyril approves.
+- **Next step (first command to run):** Cyril writes ADR-0003's Decision; then the docs
+  commit, `/review`, `/explain`, and Cyril pushes and opens the PR.
+- **Open questions for Cyril:**
+  - ADR-0003 Decision and "how we'd know we were wrong". M0.3's exit criterion ("or an ADR
+    records the fallback") is only met once that's written.
+  - `.claude/skills/gpu-budget/SKILL.md` still says "start 0.55"; measured minimums are 0.36
+    (3B) and 0.80 (7B). Your file; update it?
+  - Still open from session 1: where to keep the blocked-merge screenshot.
+- **Licences and terms to carry:**
+  - Qwen2.5-3B-Instruct-AWQ: Qwen Research License, **non-commercial** (research/evaluation).
+  - Qwen2.5-7B-Instruct-AWQ: Apache-2.0. faster-whisper large-v3: MIT.
+  - Indus Pocket TTS: CC-BY-4.0, derived from kyutai/pocket-tts: attribution required, Kyutai's
+    prohibited-use terms apply, and callers must be told they are talking to an automated system.
+- **Not proven by these runs:**
+  - The 7B's Hindi (it never reached the round trip). The 3B's Hindi looked bad in one
+    sample: reply `namaste_m_m_sharma_sham_ka_sharam_aapni_sharam_aapni_chahi_sey`
+    (romanised, so TTS reads it as English). One prompt at temperature 0; an M3 prompt issue
+    as much as a model issue.
+  - STT accuracy: Whisper heard synthetic speech resampled 24→16 kHz by linear interpolation
+    ("कल"→"कर", "अपॉइंटमेंट"→"अपॉइंडमिन"). Not a WER number.
+  - Latency of anything; CPU STT speed and RAM (ADR-0003 option 1).
+- **Things worth knowing:**
+  - vLLM uses ~700 MiB more than its setting (3B at 0.36: setting ≈ 2,948, measured +3,642).
+  - Concurrency at the same utilization varies between starts: 3B at 0.40 read 3.08x and then
+    3.49x. Hence the ≥ 1x rule rather than an exact target.
+  - nvidia-smi power still reads 590 W with limit `[N/A]`; memory readings are consistent,
+    so only memory numbers are used.
+  - The laptop slept partway through the 3B search; it was unaffected (one vLLM start per trial).
+- **Decisions made this session (Cyril; no ADR unless noted):** pin `vllm==0.19.1` for CUDA
+  12.8 builds (driver 570.207 can't run cu13 torch); uv-managed CPython (F-001); STT beam 5
+  **provisional**, revisit with M7 latency numbers; 3B first then 7B, each at its minimum;
+  Indus Pocket TTS on CPU; re-download models into the default HF cache.
+- **Things that broke:** F-001 (vLLM couldn't find `Python.h`; logged and fixed in
+  `7a5bb24`). Not logged in FAILURES: torch 2.14 resolved to cu13 (fixed by the pin); uv and
+  Hugging Face downloads failing on the flaky network (fixed with one download at a time,
+  long timeouts, `HF_HUB_DISABLE_XET=1` and retries); model weights lost when the folder
+  they'd been moved to disappeared (re-downloaded).
+- **Gate status:** `make check` ✅ (ruff clean, pyright 0 errors, 44 passed); CI: not run
+  (not pushed); eval vs baseline: n/a
+
 ## 2026-11-24 — session 1, part 2 (M0.2)
 
 - **Milestone / task:** M0.2 (branch `m0/ci-check`, PR #3)
