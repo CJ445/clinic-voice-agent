@@ -119,3 +119,19 @@ TODO(Cyril)
 - vLLM logs `results/vllm_Qwen2.5-*-AWQ_u*.log` (gitignored; local only).
 - Licences: model cards at the pinned revisions (`3559b226e8ce77211e2c1bd7ddfb7686fec4d6dd`,
   `b25037543e9394b818fdfca67ab2a00ecc7dd641`), checked 2026-11-25.
+- Qwen3-4B-Instruct-2507 AWQ (`cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit` at
+  `b37d1ccb77e27a70fe4222d995fda27940eead5a`; Apache-2.0 per its model card, base model's
+  LICENSE file Apache 2.0, checked 2026-11-25):
+  - `results/published/min_util_Qwen3-4B-Instruct-2507-AWQ-4bit.json`: commit `c9d35d8`, clean
+    tree, every trial (its record names the 10-character revision; written before full SHAs
+    were required).
+  - `results/published/vram_Qwen3-4B-Instruct-2507-AWQ-4bit.json`: commit `c9d35d8`, clean, at
+    the measured minimum, without tool calling.
+  - `results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json`: commit `27d99b6`, clean,
+    the configuration `agent.serve` runs. `llm.argv` is the vLLM command actually launched
+    (tool-calling flags included). The utilization was computed with `agent.serve.choose_util`
+    (the `min_util` record above + `UTIL_MARGIN`) and passed on the command line;
+    `tests/test_serve.py` fails if it stops matching what `choose_util` returns.
+- Serve-script policies to weigh in the Decision (`agent/serve.py`, Cyril, M3.1): `UTIL_MARGIN`
+  (added to the measured minimum) and `MAX_UTIL` (the highest utilization served); values in
+  the code.

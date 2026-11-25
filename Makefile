@@ -37,10 +37,11 @@ eval-audio:
 # GPU co-residency smoke test (PLAN M0.3). LLMS = space-separated REPO@REVISION:UTIL specs,
 # with UTIL from the minimum-utilization search. BEAM = 5 is provisional (Cyril, 2026-11-25),
 # to be revisited with latency numbers in M7.
+# TOOLS=1 starts vLLM with agent.serve's tool-calling flags, to measure the served command line.
 BEAM ?= 5
 vram:
 	@test -n "$(LLMS)" || (echo "vram: set LLMS='REPO@REVISION:UTIL ...'"; exit 1)
-	uv run python -m bench.vram --beam-size $(BEAM) $(foreach spec,$(LLMS),--llm $(spec)) $(if $(ALLOW_DIRTY),--allow-dirty)
+	uv run python -m bench.vram --beam-size $(BEAM) $(foreach spec,$(LLMS),--llm $(spec)) $(if $(ALLOW_DIRTY),--allow-dirty) $(if $(TOOLS),--tools)
 
 # Serve the dialogue LLM (PLAN M3.1). LLM = REPO@FULL_40_CHAR_SHA; the utilization is the
 # published minimum + margin (agent/serve.py) unless UTIL overrides it.
