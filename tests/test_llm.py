@@ -249,6 +249,16 @@ def test_server_unreachable_or_erroring(failure: Exception | int, reason: str) -
     assert (reply.reason, reply.attempts) == (reason, 2)
 
 
+@pytest.mark.parametrize("status", [400, 404, 422])
+def test_client_errors_are_not_retried(status: int) -> None:
+    # Review #6: a 4xx (e.g. a prompt over max-model-len) fails the same way twice; retrying it
+    # only doubles the time before the caller hears the fallback line.
+    server = FakeServer(status, TEXT)
+    reply = ask(server)
+    assert isinstance(reply, llm.LLMUnavailable)
+    assert (reply.reason, reply.attempts, len(server.requests)) == ("http_error", 1, 1)
+
+
 def test_total_budget_caps_a_reply_that_keeps_trickling() -> None:
     trickle: list[Part] = [ROLE]
     for _ in range(12):  # a token every 0.1 s: never stalls, but runs past the 1.0 s total

@@ -6,7 +6,8 @@ quickly; the caller side then plays a fallback line. Rules (Cyril, M3.1):
 - First token = the first chunk with text or a tool-call delta. vLLM's role-only first chunk is
   recorded as first_chunk_ns (diagnostic) and does not count.
 - At most one retry, and only if nothing was received; never once a token has streamed, so a
-  half-heard reply is never repeated. The SDK's own retries are off (max_retries=0).
+  half-heard reply is never repeated, and never for a 4xx, which would fail the same way.
+  The SDK's own retries are off (max_retries=0).
 - A cancellation (barge-in) propagates as CancelledError and closes the stream. It is never turned
   into LLMUnavailable (CLAUDE.md rule 7).
 - finish_reason "length" (MAX_TOKENS reached) is an LLMReply with the text so far: in streaming,
@@ -68,11 +69,14 @@ class LLMUnavailable:
 
 
 class _Failed(Exception):
-    def __init__(self, reason: Reason, detail: str, *, got_token: bool) -> None:
+    def __init__(
+        self, reason: Reason, detail: str, *, got_token: bool, retryable: bool = True
+    ) -> None:
         super().__init__(detail)
         self.reason: Reason = reason
         self.detail = detail
         self.got_token = got_token
+        self.retryable = retryable  # False for a 4xx: the same request fails the same way
 
 
 def make_client(
@@ -105,7 +109,7 @@ async def complete(
                 try:
                     return await _attempt(client, messages, tools, attempts)
                 except _Failed as failed:
-                    if failed.got_token or attempts == ATTEMPTS:
+                    if failed.got_token or not failed.retryable or attempts == ATTEMPTS:
                         elapsed = time.perf_counter_ns() - start
                         return LLMUnavailable(failed.reason, failed.detail, attempts, elapsed)
     except TimeoutError:
@@ -133,7 +137,9 @@ async def _attempt(
     except TimeoutError:
         raise _Failed("first_token", "no response headers in time", got_token=False) from None
     except APIStatusError as exc:
-        raise _Failed("http_error", f"HTTP {exc.status_code}", got_token=False) from exc
+        retryable = exc.status_code >= 500  # never retry a 4xx (review #6)
+        detail = f"HTTP {exc.status_code}"
+        raise _Failed("http_error", detail, got_token=False, retryable=retryable) from exc
     except APIConnectionError as exc:
         raise _Failed("connect", str(exc), got_token=False) from exc
 
