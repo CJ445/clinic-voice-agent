@@ -86,3 +86,20 @@ def test_error_message_has_home_dir_stripped() -> None:
 
 def test_error_message_is_bounded() -> None:
     assert len(describe_error(RuntimeError("x" * 1000), home="/home/someone")) <= 300
+
+
+def test_incomplete_set_has_no_headroom() -> None:
+    # Review #5: the 7B record said headroom 954 beside fits false; 954 was measured with no STT
+    # loaded, so anything checking headroom >= 500 alone would have passed it.
+    at = {"baseline": 11, "after_llm": 7139}
+    mib, ok = summarize(at, peak_gpu=7234, total=TOTAL, error="RuntimeError: out of memory")
+    assert mib["headroom"] is None
+    assert mib["room_left_after_llm"] == TOTAL - 7139
+    assert ok is False
+
+
+def test_all_stages_but_an_error_later_has_no_headroom() -> None:
+    # Loaded everything, then the round trip failed: the peak never saw inference load.
+    mib, ok = summarize(FULL, peak_gpu=5300, total=TOTAL, error="URLError: refused")
+    assert mib["headroom"] is None
+    assert ok is False

@@ -106,7 +106,7 @@ def summarize(
     """Turn per-stage GPU readings into the record's MiB block and the fits verdict.
 
     `at` holds total GPU MiB read after each stage that completed. Stages never reached are None.
-    Fits only with no error, a measured peak, and headroom >= MIN_HEADROOM_MIB.
+    Fits only for the full set with no error, a measured peak, and headroom >= MIN_HEADROOM_MIB.
     """
 
     def change(after: str, before: str) -> int | None:
@@ -119,9 +119,13 @@ def summarize(
     mib["peak_used"] = peak_gpu
     if "after_llm" in at:
         mib["room_left_after_llm"] = headroom_mib(total_mib=total, peak_used_mib=at["after_llm"])
-    headroom = None if peak_gpu is None else headroom_mib(total_mib=total, peak_used_mib=peak_gpu)
+    # Headroom only means something for the full set under load: every stage loaded, the round
+    # trip finished, and the peak was measured. Otherwise null; room_left_after_llm still shows
+    # what the LLM alone left (review #5).
+    complete = error is None and peak_gpu is not None and "after_tts" in at
+    headroom = headroom_mib(total_mib=total, peak_used_mib=peak_gpu) if complete else None
     mib["headroom"] = headroom
-    return mib, error is None and headroom is not None and fits(headroom)
+    return mib, headroom is not None and fits(headroom)
 
 
 def load_stt() -> Any:
