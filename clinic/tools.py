@@ -14,7 +14,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from clinic.clock import Clock
 from clinic.db import from_db_time, to_db_time
@@ -276,3 +276,73 @@ def _book(conn: sqlite3.Connection, clock: Clock, req: BookIn) -> BookOut | Tool
     )
     assert cursor.lastrowid is not None
     return _booked(conn, cursor.lastrowid, replayed=False)
+
+
+class CancelIn(Model):
+    """Cancel by appointment_id, or by the patient's phone plus the slot_id. Exactly one way."""
+
+    appointment_id: int | None = Field(default=None, ge=1)
+    phone: str | None = None
+    slot_id: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, value: str | None) -> str | None:
+        return None if value is None else normalize_phone(value)
+
+    @model_validator(mode="after")
+    def _one_way(self) -> "CancelIn":
+        by_id = self.appointment_id is not None
+        by_patient = self.phone is not None and self.slot_id is not None
+        partial = (self.phone is None) != (self.slot_id is None)
+        if by_id == by_patient or partial:
+            raise ValueError("give appointment_id, or phone and slot_id (not both, not neither)")
+        return self
+
+
+class CancelOut(Model):
+    ok: Literal[True] = True
+    appointment_id: int
+    slot_id: str
+    status: Literal["cancelled"] = "cancelled"
+
+
+def cancel(conn: sqlite3.Connection, clock: Clock, req: CancelIn) -> CancelOut | ToolError:
+    """Cancel one appointment under a write lock; a ToolError rolls back (same pattern as book;
+    factor it out on a third use, CLAUDE.md rule 5)."""
+    if conn.in_transaction:
+        raise RuntimeError("cancel() must start its own transaction; commit or roll back first")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        result = _cancel(conn, clock, req)
+    except BaseException:
+        conn.rollback()
+        raise
+    if isinstance(result, ToolError):
+        conn.rollback()
+    else:
+        conn.commit()
+    return result
+
+
+def _cancel(conn: sqlite3.Connection, clock: Clock, req: CancelIn) -> CancelOut | ToolError:
+    query = """
+        SELECT a.id, a.slot_id, a.status, s.start FROM appointments a
+        JOIN slots s ON s.id = a.slot_id JOIN patients p ON p.id = a.patient_id
+    """
+    if req.appointment_id is not None:
+        rows = conn.execute(query + " WHERE a.id = ?", (req.appointment_id,)).fetchall()
+    else:
+        rows = conn.execute(
+            query + " WHERE p.phone = ? AND a.slot_id = ?", (req.phone, req.slot_id)
+        ).fetchall()
+    if not rows:
+        return ToolError(code="not_found", message="no matching appointment")
+    active = [row for row in rows if row[2] == "booked"]  # at most one, by the unique index
+    if not active:
+        return ToolError(code="already_cancelled", message="that appointment is already cancelled")
+    appointment_id, slot_id, _, start_text = active[0]
+    if from_db_time(start_text) <= clock.now():
+        return ToolError(code="past_slot", message="that appointment has already started")
+    conn.execute("UPDATE appointments SET status = 'cancelled' WHERE id = ?", (appointment_id,))
+    return CancelOut(appointment_id=appointment_id, slot_id=slot_id)
