@@ -10,11 +10,12 @@ Scope: book() accepts any slot_id that check_slots *could* return (exists, open,
 Checking it was returned in *this* conversation needs session state: the M3.2 slot-grounding guard.
 """
 
+import inspect
 import sqlite3
 from datetime import date, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from clinic.clock import Clock
 from clinic.db import from_db_time, to_db_time
@@ -346,3 +347,46 @@ def _cancel(conn: sqlite3.Connection, clock: Clock, req: CancelIn) -> CancelOut 
         return ToolError(code="past_slot", message="that appointment has already started")
     conn.execute("UPDATE appointments SET status = 'cancelled' WHERE id = ?", (appointment_id,))
     return CancelOut(appointment_id=appointment_id, slot_id=slot_id)
+
+
+# name -> (input model, function). The only tools the agent has.
+TOOLS: dict[str, tuple[type[Model], Any]] = {
+    "check_slots": (CheckSlotsIn, check_slots),
+    "book": (BookIn, book),
+    "cancel": (CancelIn, cancel),
+}
+
+
+def run(conn: sqlite3.Connection, clock: Clock, name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Call a tool with the LLM's raw JSON arguments; always return a JSON-ready dict.
+
+    Bad arguments become ToolError(invalid_input) naming the field, so the agent can ask the
+    caller again instead of crashing the turn.
+    """
+    if name not in TOOLS:
+        known = ", ".join(TOOLS)
+        return ToolError(
+            code="unknown_tool", message=f"no tool {name!r}; tools: {known}"
+        ).model_dump(mode="json")
+    model, tool = TOOLS[name]
+    try:
+        req = model.model_validate(args)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in err['loc']) or 'input'}: {err['msg']}"
+            for err in exc.errors()
+        )
+        return ToolError(code="invalid_input", message=problems).model_dump(mode="json")
+    return tool(conn, clock, req).model_dump(mode="json")
+
+
+def tool_schemas() -> dict[str, dict[str, Any]]:
+    """One function schema per tool (name, description, JSON-schema parameters) for the LLM."""
+    return {
+        name: {
+            "name": name,
+            "description": inspect.cleandoc(model.__doc__ or name),
+            "parameters": model.model_json_schema(),
+        }
+        for name, (model, _) in TOOLS.items()
+    }
