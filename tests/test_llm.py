@@ -39,6 +39,7 @@ class FakeServer:
         self.responses = list(responses)
         self.requests: list[dict[str, object]] = []
         self.sent: list[httpx2.Response] = []
+        self.header_delay = 0.0  # seconds before every response's headers
 
     async def _body(self, parts: Sequence[Part]) -> AsyncIterator[bytes]:
         for part in parts:
@@ -51,6 +52,7 @@ class FakeServer:
 
     async def handle(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(json.loads(request.content))
+        await asyncio.sleep(self.header_delay)
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -238,6 +240,32 @@ def test_barge_in_cancellation_propagates_and_closes_the_stream() -> None:
     # The HTTP response is released, not left holding a pooled connection. (The SDK also closes
     # it on its own here, so removing `async with stream` is an equivalent mutant.)
     assert len(server.sent) == 1 and server.sent[0].is_closed
+
+
+@pytest.mark.parametrize(
+    ("header_delay", "responses", "cancel_at", "requests"),
+    [
+        (0.15, [TEXT], 0.05, 1),  # while waiting for response headers, inside create()
+        (0.0, [[0.3, *TEXT], [ROLE, 0.5, *TEXT[1:]]], 0.3, 2),  # during the retry (attempt 2)
+    ],
+)
+def test_barge_in_elsewhere_also_propagates(
+    header_delay: float, responses: list[list[Part]], cancel_at: float, requests: int
+) -> None:
+    # Review #5: rule 7 must hold at every await, not only between chunks.
+    server = FakeServer(*responses)
+    server.header_delay = header_delay
+
+    async def barge_in() -> None:
+        task = asyncio.create_task(llm.complete(server.client(), [], None))  # type: ignore[arg-type]
+        await asyncio.sleep(cancel_at)
+        task.cancel()
+        await task
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(barge_in())
+    assert len(server.requests) == requests
+    assert all(response.is_closed for response in server.sent)
 
 
 def test_client_never_retries_on_its_own() -> None:
