@@ -103,14 +103,26 @@ def describe_error(exc: BaseException, *, home: str) -> str:
     return f"{type(exc).__name__}: {exc}".replace(home, "~")[:300]
 
 
+def combine_errors(stage_error: str | None, sampler_error: str | None) -> str | None:
+    """Keep both errors for the record; None only if neither happened."""
+    return "; ".join(e for e in (stage_error, sampler_error) if e) or None
+
+
 def summarize(
-    at: dict[str, int], *, peak_gpu: int | None, total: int, error: str | None
+    at: dict[str, int],
+    *,
+    peak_gpu: int | None,
+    total: int,
+    error: str | None,
+    sampler_error: str | None = None,
 ) -> tuple[dict[str, int | None], bool]:
     """Turn per-stage GPU readings into the record's MiB block and the fits verdict.
 
     `at` holds total GPU MiB read after each stage that completed. Stages never reached are None.
-    Fits only for the full set with no error, a measured peak, and headroom >= MIN_HEADROOM_MIB.
+    Fits only for the full set with no stage or sampler error, a measured peak, and headroom >=
+    MIN_HEADROOM_MIB. A sampler error alone fails the run: the peak may be too low (review #1).
     """
+    error = combine_errors(error, sampler_error)
 
     def change(after: str, before: str) -> int | None:
         return at[after] - at[before] if after in at and before in at else None
@@ -198,8 +210,8 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
     finally:
         vllm_server.stop(proc)
 
-    error = error or peaks.error
-    mib, ok = summarize(at, peak_gpu=peaks.gpu, total=total, error=error)
+    mib, ok = summarize(at, peak_gpu=peaks.gpu, total=total, error=error, sampler_error=peaks.error)
+    error = combine_errors(error, peaks.error)
     return {
         "llm": {
             "repo": repo,

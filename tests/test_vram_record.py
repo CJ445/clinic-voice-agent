@@ -7,7 +7,7 @@ that were never reached are None. Error messages must not carry the home directo
 
 import time
 
-from bench.vram import Peaks, describe_error, summarize
+from bench.vram import Peaks, combine_errors, describe_error, summarize
 
 TOTAL = 8188
 FULL = {"baseline": 11, "after_llm": 3653, "after_stt": 5252, "after_tts": 5252}
@@ -103,3 +103,18 @@ def test_all_stages_but_an_error_later_has_no_headroom() -> None:
     mib, ok = summarize(FULL, peak_gpu=5300, total=TOTAL, error="URLError: refused")
     assert mib["headroom"] is None
     assert ok is False
+
+
+def test_sampler_error_alone_fails_the_run() -> None:
+    # Second review #2: the sampler died after a few good samples, so the peak is set but too
+    # low; with no stage error, the run must still fail.
+    mib, ok = summarize(FULL, peak_gpu=5300, total=TOTAL, error=None, sampler_error="sampler: x")
+    assert ok is False
+    assert mib["headroom"] is None
+
+
+def test_both_errors_are_kept() -> None:
+    assert combine_errors("OOM", "sampler: x") == "OOM; sampler: x"
+    assert combine_errors(None, "sampler: x") == "sampler: x"
+    assert combine_errors("OOM", None) == "OOM"
+    assert combine_errors(None, None) is None
