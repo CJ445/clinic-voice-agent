@@ -49,7 +49,8 @@ make gate         # compare latest eval vs ci/baseline.json; non-zero exit on re
 ## Rules of engagement
 
 1. **Small diffs.** One concern per commit, aim < 200 changed lines. If a change grows,
-   stop and propose a split.
+   stop and propose a split. Test files and generated files may exceed 200 lines in one
+   commit if the commit body says so; code stays under 200.
 2. **Tests first for logic.** Tools, scorers, date parsing, and the gate script get unit
    tests before or with the code. Never weaken or delete a test to make it pass — report it.
 3. **No invented numbers.** Never write a latency, WER, or score into any doc by hand.
