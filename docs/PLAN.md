@@ -49,7 +49,7 @@ models fit with ≥ 500 MiB headroom, or an ADR records the fallback (smaller LL
       returned by `check_slots` (never a free-text date/time) and rejects unknown IDs
 - [x] M2.3 Edge-case tests: double booking, past slot, cancel nonexistent, IST midnight boundary,
       idempotent retry of `book`
-- [ ] M2.4 Date resolution helper ("next Friday", "parso", "kal shaam") + table-driven tests
+- [x] M2.4 Date resolution helper ("next Friday", "parso", "kal shaam") + table-driven tests
 
 **Exit:** tools 100% branch-covered; date helper passes ≥ 40 table cases incl. Hinglish.
 
