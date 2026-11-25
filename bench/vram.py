@@ -14,9 +14,11 @@ GPU-only imports live inside functions: CI does not install the gpu dependency g
 import argparse
 import datetime as dt
 import json
+import multiprocessing
 import subprocess
 import sys
 import threading
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -121,30 +123,43 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
     revision, _, util = rest.partition(":")
     if parse_compute_apps(sh("nvidia-smi", APPS_QUERY, CSV)):
         raise RuntimeError("another compute process is using the GPU; stop it first")
-    mib = {"baseline": gpu_used_mib()}
+    at = {"baseline": gpu_used_mib()}  # total GPU MiB used, read after each stage
     log = log_dir / f"vllm_{repo.split('/')[-1]}.log"
+    transcript, reply, reply_samples, error = "", "", 0, None
     proc = vllm_server.start(repo, revision, float(util), log)
     try:
         with Peaks() as peaks:
-            vllm_server.wait_ready(proc)
-            mib["after_llm"] = gpu_used_mib()
-            stt = load_stt()
-            mib["after_stt"] = gpu_used_mib()
-            speak = load_tts()
-            mib["after_tts"] = gpu_used_mib()
-            audio = to_16k(speak(PROMPT_HI))
-            segments, _ = stt.transcribe(audio, language="hi", beam_size=beam)
-            transcript = " ".join(s.text.strip() for s in segments)
-            reply = vllm_server.chat(SYSTEM, transcript)
-            reply_samples = len(speak(reply))
+            # A model set that does not fit (e.g. STT out of memory) is a result, not a crash:
+            # record how far it got and the error, so ADR-0003 sees every option.
+            try:
+                vllm_server.wait_ready(proc)
+                at["after_llm"] = gpu_used_mib()
+                stt = load_stt()
+                at["after_stt"] = gpu_used_mib()
+                speak = load_tts()
+                at["after_tts"] = gpu_used_mib()
+                audio = to_16k(speak(PROMPT_HI))
+                segments, _ = stt.transcribe(audio, language="hi", beam_size=beam)
+                transcript = " ".join(s.text.strip() for s in segments)
+                reply = vllm_server.chat(SYSTEM, transcript)
+                reply_samples = len(speak(reply))
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}".replace(str(Path.home()), "~")[:300]
     finally:
         vllm_server.stop(proc)
-    mib["llm"] = mib["after_llm"] - mib["baseline"]
-    mib["stt"] = mib["after_stt"] - mib["after_llm"]
-    mib["tts_measured_delta"] = mib["after_tts"] - mib["after_stt"]
+
+    def change(after: str, before: str) -> int | None:
+        return at[after] - at[before] if after in at and before in at else None
+
+    mib: dict[str, int | None] = {**at}
+    mib["llm"] = change("after_llm", "baseline")
+    mib["stt"] = change("after_stt", "after_llm")
+    mib["tts_measured_delta"] = change("after_tts", "after_stt")
     mib["peak_used"] = peaks.gpu
-    mib["room_left_after_llm"] = headroom_mib(total_mib=total, peak_used_mib=mib["after_llm"])
-    mib["headroom"] = headroom_mib(total_mib=total, peak_used_mib=peaks.gpu)
+    if "after_llm" in at:
+        mib["room_left_after_llm"] = headroom_mib(total_mib=total, peak_used_mib=at["after_llm"])
+    headroom = headroom_mib(total_mib=total, peak_used_mib=peaks.gpu)
+    mib["headroom"] = headroom
     return {
         "llm": {
             "repo": repo,
@@ -162,15 +177,24 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
         },
         "tts": {"repo": TTS_REPO, "revision": TTS_REVISION, "device": "cpu", "vram_mib": 0},
         "mib": mib,
-        "fits": fits(mib["headroom"]),
+        "fits": error is None and fits(headroom),
+        "error": error,
         "peak_ram_used_mib": peaks.ram,
         "round_trip": {
             "transcript": transcript,
             "reply": reply,
             "reply_tts_samples": reply_samples,
-            "ok": bool(transcript and reply and reply_samples),
+            "ok": error is None and bool(transcript and reply and reply_samples),
         },
     }
+
+
+def run_isolated(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]:
+    """Run one model set in a fresh process, so its STT model and CUDA context are freed on exit
+    and the next run starts from an idle GPU (the baseline check would otherwise see us)."""
+    spawn = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=1, mp_context=spawn) as pool:
+        return pool.submit(run_one, llm, beam, total, log_dir).result()
 
 
 def main() -> None:
@@ -183,7 +207,7 @@ def main() -> None:
     import torch  # pyright: ignore[reportMissingImports]  # only for torch's CUDA build version
 
     gpu = parse_gpu_query(sh("nvidia-smi", GPU_QUERY, CSV))
-    runs = [run_one(llm, args.beam_size, gpu.total_mib, args.out.parent) for llm in args.llm]
+    runs = [run_isolated(llm, args.beam_size, gpu.total_mib, args.out.parent) for llm in args.llm]
     record = {
         "commit": sh("git", "rev-parse", "--short", "HEAD").strip(),
         "dirty": bool(sh("git", "status", "--porcelain").strip()),
