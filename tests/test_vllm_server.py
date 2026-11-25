@@ -5,7 +5,9 @@ shows at least 1x concurrency at max-model-len 4096. The fixture lines are copie
 real vLLM 0.19.1 start of Qwen2.5-3B-Instruct-AWQ at 0.40 on the RTX 4060 (2026-11-25).
 """
 
+import os
 import socket
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -68,3 +70,34 @@ def test_start_refuses_when_port_is_taken(tmp_path: Path, monkeypatch: pytest.Mo
         with pytest.raises(RuntimeError, match=str(port)):
             vllm_server.start("some/model", "rev", 0.5, tmp_path / "vllm.log")
     assert not (tmp_path / "vllm.log").exists()  # refused before launching anything
+
+
+def _group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_stop_kills_a_surviving_child_after_the_leader_exited() -> None:
+    # Review #3: if the API server dies but its engine child (which holds the VRAM) survives,
+    # stop() used to return early and never kill the group.
+    proc = subprocess.Popen(["sh", "-c", "sleep 60 & exit 0"], start_new_session=True)
+    proc.wait()  # the leader is gone; `sleep` is still running in its process group
+    assert _group_alive(proc.pid)
+    vllm_server.stop(proc)
+    assert not _group_alive(proc.pid)
+
+
+def test_stop_kills_a_running_leader() -> None:
+    proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    vllm_server.stop(proc)
+    assert proc.returncode is not None
+    assert not _group_alive(proc.pid)
+
+
+def test_stop_is_safe_when_everything_already_exited() -> None:
+    proc = subprocess.Popen(["true"], start_new_session=True)
+    proc.wait()
+    vllm_server.stop(proc)  # must not raise ProcessLookupError

@@ -90,16 +90,29 @@ def wait_ready(proc: subprocess.Popen[bytes], timeout_s: float = 900) -> None:
     raise TimeoutError(f"vLLM not ready after {timeout_s:.0f}s")
 
 
-def stop(proc: subprocess.Popen[bytes]) -> None:
-    """SIGTERM the whole process group; SIGKILL it if it has not exited after 60 s."""
-    if proc.poll() is not None:
-        return
-    os.killpg(proc.pid, signal.SIGTERM)
+def _signal_and_wait(proc: subprocess.Popen[bytes], sig: int, grace_s: float) -> bool:
+    """Send sig to the process group; return True once nothing is left in it."""
+    deadline = time.monotonic() + grace_s
     try:
-        proc.wait(timeout=60)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
+        os.killpg(proc.pid, sig)
+        while time.monotonic() < deadline:
+            proc.poll()  # reap the leader so it doesn't linger as a zombie in the group
+            os.killpg(proc.pid, 0)  # raises ProcessLookupError once the group is empty
+            time.sleep(0.2)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def stop(proc: subprocess.Popen[bytes]) -> None:
+    """SIGTERM vLLM's whole process group, then SIGKILL whatever is left after 60 s.
+
+    Always signals the group, even if the server process already exited: its engine child
+    holds the VRAM and can outlive it (review #3).
+    """
+    if not _signal_and_wait(proc, signal.SIGTERM, grace_s=60):
+        _signal_and_wait(proc, signal.SIGKILL, grace_s=10)
+    proc.wait()
 
 
 def chat(system: str, user: str, max_tokens: int = 64) -> str:
