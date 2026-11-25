@@ -1,6 +1,6 @@
 """Start, health-check, query and stop a local `vllm serve` process.
 
-Used by bench/vram.py now and by the M3.1 serve script later. vLLM pre-allocates VRAM when it
+Used by agent/serve.py (PLAN M3.1) and by the bench scripts. vLLM pre-allocates VRAM when it
 starts, so callers must start it before loading any other GPU model (gpu-budget skill).
 Stdlib only, so it type-checks in CI where the gpu dependency group is not installed.
 """
@@ -19,6 +19,10 @@ from pathlib import Path
 PORT = 8011
 MAX_MODEL_LEN = 4096
 BASE_URL = f"http://127.0.0.1:{PORT}"
+# stop(): SIGTERM grace, then SIGKILL grace, then the bound on reaping the server process.
+TERM_GRACE_S = 60
+KILL_GRACE_S = 10
+WAIT_S = 5
 
 
 # vLLM 0.19.1 prints e.g. "Maximum concurrency for 4,096 tokens per request: 3.08x".
@@ -34,6 +38,20 @@ def parse_max_concurrency(log_text: str, *, max_model_len: int) -> float | None:
     return found
 
 
+_FULL_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def require_full_sha(revision: str) -> str:
+    """Return revision if it is a full 40-character commit SHA; raise ValueError otherwise.
+
+    A short revision resolves offline only if the local HF cache happens to hold a refs/<short>
+    file, so a record that names one can't be reproduced elsewhere (Cyril, M3.1).
+    """
+    if not _FULL_SHA.fullmatch(revision):
+        raise ValueError(f"revision {revision!r} is not a full 40-character commit SHA")
+    return revision
+
+
 def port_in_use(port: int) -> bool:
     """True if something already accepts connections on 127.0.0.1:port."""
     with socket.socket() as probe:
@@ -41,13 +59,16 @@ def port_in_use(port: int) -> bool:
         return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
-def server_command(repo: str, revision: str, util: float) -> list[str]:
+def server_command(repo: str, revision: str, util: float, *, tools: bool = False) -> list[str]:
     """The `vllm serve` command line. No --enforce-eager, so CUDA graphs stay on.
 
     Bound to 127.0.0.1: the bench server has no authentication, so it must not listen on
-    every network interface while it runs.
+    every network interface while it runs. tools=True (the serve script) adds tool calling
+    with vLLM's hermes parser, which reads the <tool_call>{"name", "arguments"}</tool_call>
+    blocks the Qwen2.5 and Qwen3-2507 chat templates emit; the bench leaves it off so its
+    measured command line stays the same.
     """
-    return [
+    command = [
         sys.executable,
         "-m",
         "vllm.entrypoints.openai.api_server",
@@ -66,9 +87,14 @@ def server_command(repo: str, revision: str, util: float) -> list[str]:
         "--max-model-len",
         str(MAX_MODEL_LEN),
     ]
+    if tools:
+        command += ["--enable-auto-tool-choice", "--tool-call-parser", "hermes"]
+    return command
 
 
-def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[bytes]:
+def start(
+    repo: str, revision: str, util: float, log: Path, *, tools: bool = False
+) -> subprocess.Popen[bytes]:
     """Launch the OpenAI-compatible server in its own session.
 
     Refuses if the port is already taken: a stale server there would answer /health and
@@ -79,7 +105,7 @@ def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[
         raise RuntimeError(f"port {PORT} is already in use; stop the server holding it first")
     # New session so stop() can kill vLLM's engine child process too, not just the server.
     return subprocess.Popen(
-        server_command(repo, revision, util),
+        server_command(repo, revision, util, tools=tools),
         stdout=log.open("wb"),
         stderr=subprocess.STDOUT,
         start_new_session=True,
@@ -116,14 +142,21 @@ def _signal_and_wait(proc: subprocess.Popen[bytes], sig: int, grace_s: float) ->
 
 
 def stop(proc: subprocess.Popen[bytes]) -> None:
-    """SIGTERM vLLM's whole process group, then SIGKILL whatever is left after 60 s.
+    """SIGTERM vLLM's whole process group, then SIGKILL whatever is left after TERM_GRACE_S.
 
     Always signals the group, even if the server process already exited: its engine child
-    holds the VRAM and can outlive it (review #3).
+    holds the VRAM and can outlive it (review #3). Raises RuntimeError rather than returning
+    while the group may still hold VRAM, and never waits without a limit (review M0.3 #1).
     """
-    if not _signal_and_wait(proc, signal.SIGTERM, grace_s=60):
-        _signal_and_wait(proc, signal.SIGKILL, grace_s=10)
-    proc.wait()
+    gone = _signal_and_wait(proc, signal.SIGTERM, grace_s=TERM_GRACE_S)
+    if not gone:
+        gone = _signal_and_wait(proc, signal.SIGKILL, grace_s=KILL_GRACE_S)
+    if not gone:
+        raise RuntimeError(f"vLLM process group {proc.pid} survived SIGKILL; its VRAM may be held")
+    try:
+        proc.wait(timeout=WAIT_S)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"vLLM process {proc.pid} was not reaped after {WAIT_S} s") from exc
 
 
 def chat(system: str, user: str, max_tokens: int = 64) -> str:

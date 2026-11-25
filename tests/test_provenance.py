@@ -87,7 +87,7 @@ def test_provenance_refuses_dirty_without_flag(repo: Path) -> None:
     ("module", "argv"),
     [
         (vram, ["bench.vram", "--beam-size", "5", "--llm", "x/y@rev:0.5"]),
-        (min_util, ["bench.min_util", "--llm", "x/y@rev", "--lo", "0.2", "--hi", "0.4"]),
+        (min_util, ["bench.min_util", "--llm", "x/y@" + "0" * 40, "--lo", "0.2", "--hi", "0.4"]),
     ],
 )
 def test_scripts_refuse_a_dirty_tree_before_touching_the_gpu(

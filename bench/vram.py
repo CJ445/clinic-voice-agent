@@ -24,7 +24,8 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from bench import provenance, vllm_server
+from agent import vllm_server
+from bench import provenance
 from bench.gpu_mem import (
     MIN_HEADROOM_MIB,
     check_record,

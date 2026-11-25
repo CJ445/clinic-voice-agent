@@ -5,6 +5,42 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ---
 
+## 2026-11-25 — session 2 (cont.), M3.1 on `m3/serve` (in review)
+
+- **Since M2:** #12 (dates follow-up) and #13 (Qwen3-4B measurements) merged. M3.1 is on
+  `m3/serve`, ticked in PLAN, waiting for Cyril to push and open the PR.
+- **M3.1 delivered:** `agent/vllm_server.py` (moved from bench/; `stop()` raises if SIGKILL
+  fails, bounded wait); `agent/serve.py` + `make serve LLM=REPO@FULL_SHA` (published min_util
+  + `UTIL_MARGIN`, refuses unmeasured models, `0 < util <= MAX_UTIL`, hermes tool flags,
+  warm-up, uninterruptible stop); `agent/llm.py` (AsyncOpenAI streaming with connect,
+  first-token, inter-chunk and total limits; typed `LLMUnavailable`; one retry only when nothing
+  was received, never for a 4xx; barge-in propagates); `bench.min_util` takes full SHAs only;
+  `openai` and `httpx2` declared. `tests/test_llm_live.py` (gpu) proves hermes on the RTX 4060.
+- **Carry into M3.2 (Cyril, review #1):**
+  - Speak only complete sentences: on `finish_reason == "length"`, drop the unfinished tail.
+  - `truncated_tool_call=True` → one turn-level re-prompt ("reply with only the tool call"),
+    separate from transport retries, then the fallback line.
+  - Still owed from M2: the orchestrator supplies `idempotency_key` (strict xfail in
+    `tests/test_tools_book.py`).
+- **Carry into M5 (Cyril, review #1):** count `truncated_tool_call` as a tool-call failure;
+  report the rate of `"length"` finishes.
+- **For ADR-0003:** `UTIL_MARGIN` (+0.02 over the measured minimum) and `MAX_UTIL` are
+  serve-script policies; record them in the ADR's Evidence/Decision.
+- **Next PR (Cyril):** `m1/adr-0003-served-util`: `make vram` for Qwen3-4B at 0.61 with the
+  exact serve command line (`tools=True` flags), publish it, update ADR-0003 Evidence. Until
+  then `agent.serve` labels its headroom "computed, not measured". Note: `bench/vram.py` does
+  not pass `tools=True` today, so that PR needs a small change to do it.
+- **Review nits, not done (Cyril: log):**
+  - #7 `test_timing_constants_are_marked_initial` greps the source for a comment; drop it or
+    move the reminder to PLAN.
+  - #9 bare `.venv/bin/pyright` (without `uv run`) reports 4 false errors; add `venvPath`/`venv`
+    to `[tool.pyright]` so editors agree with `make check`.
+- **Observed:** the live serve showed nvidia-smi use above util x total; the budget line says
+  its remainder is an upper bound. `make check` takes ~12.5 s (was ~8.6 s; the LLM timing tests
+  add ~3.5 s).
+
+---
+
 ## 2026-11-25 — session 2, end of M2
 
 - **Milestone / task:** M2 (clinic backend + tools) complete. All four PRs merged: #7 M2.1,

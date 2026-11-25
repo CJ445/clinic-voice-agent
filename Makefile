@@ -1,4 +1,4 @@
-.PHONY: setup lint format types test check eval-text eval-audio bench vram gate
+.PHONY: setup lint format types test check eval-text eval-audio bench vram serve gate
 
 setup:
 	uv sync --locked --group gpu  # plain `uv sync` would uninstall the gpu group
@@ -41,6 +41,12 @@ BEAM ?= 5
 vram:
 	@test -n "$(LLMS)" || (echo "vram: set LLMS='REPO@REVISION:UTIL ...'"; exit 1)
 	uv run python -m bench.vram --beam-size $(BEAM) $(foreach spec,$(LLMS),--llm $(spec)) $(if $(ALLOW_DIRTY),--allow-dirty)
+
+# Serve the dialogue LLM (PLAN M3.1). LLM = REPO@FULL_40_CHAR_SHA; the utilization is the
+# published minimum + margin (agent/serve.py) unless UTIL overrides it.
+serve:
+	@test -n "$(LLM)" || (echo "serve: set LLM='REPO@FULL_40_CHAR_SHA'"; exit 1)
+	uv run python -m agent.serve --llm $(LLM) $(if $(UTIL),--util $(UTIL))
 
 bench:
 	@test -f bench/latency.py || (echo "bench: not implemented yet (PLAN M4.2)"; exit 1)
