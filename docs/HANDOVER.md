@@ -7,6 +7,22 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ## 2026-11-25 — session 2, M2 (in progress)
 
+- **M2.3** (branch `m2/edge-tests`): `7bc647b` pytest-cov → `806c695` edge-case tests →
+  `90da458` `make cov` → `5c7b8b0` start barrier + review fixes → `c8bbefa` coverage folded into
+  `make test` (Cyril) → `999adf4` CLAUDE.md rule 1 (Cyril). `806c695` is 263 lines of tests; its
+  body doesn't say so, as the new rule 1 asks (written before the rule changed).
+  7 faults injected into `clinic/tools.py` / `clinic/db.py`, all caught (list in the PR).
+- **M2.3 `/review` log** (fixed: race could stop racing, lost thread errors, the UTC tests that
+  never saw UTC, the unchecked cancel error code, the G1 comment, walrus, busy-spin; the rest is
+  logged here, not discussed):
+  - `test_cancel_nonexistent_and_twice_by_phone_and_slot` largely duplicates cases in
+    `tests/test_tools_cancel.py`; the cancel/rebook/cancel test is the new one.
+  - `race: Any` in the race tests could be a `Callable[...]` type.
+  - If one worker process hangs, `communicate(timeout=60)` raises and the other children aren't
+    killed.
+  - The subject of `90da458` ("make cov enforces") overstated it: nothing ran `cov` until
+    `c8bbefa` replaced it.
+
 - **M2.2** (branch `m2/tools`): `978d871` pydantic dep → `99953ff` blocked-slot triggers
   (option 3) → `fa64c95` check_slots → `e65d372` book → `94d421a` cancel → `0ed462c` run() +
   JSON schemas → review fixes `9a81138` (typed `busy`), `1948822` (untested branches, strict id),
