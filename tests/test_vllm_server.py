@@ -145,3 +145,24 @@ def test_server_binds_to_localhost_only() -> None:
     cmd = vllm_server.server_command("some/model", "rev", 0.5)
     assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
     assert cmd[cmd.index("--port") + 1] == str(vllm_server.PORT)
+
+
+def test_full_sha_is_accepted() -> None:
+    sha = "b37d1ccb77e27a70fe4222d995fda27940eead5a"
+    assert vllm_server.require_full_sha(sha) == sha
+
+
+@pytest.mark.parametrize(
+    "revision",
+    [
+        "b37d1ccb77",
+        "main",
+        "B37D1CCB77E27A70FE4222D995FDA27940EEAD5A",
+        "b37d1ccb77e27a70fe4222d9" + "z" * 16,
+    ],
+)
+def test_short_or_named_revisions_are_refused(revision: str) -> None:
+    # Cyril, M3.1: a 10-character revision only resolved offline because the local HF cache had a
+    # refs/<short> file, so records must name the full commit.
+    with pytest.raises(ValueError, match="40"):
+        vllm_server.require_full_sha(revision)

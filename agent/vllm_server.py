@@ -38,6 +38,20 @@ def parse_max_concurrency(log_text: str, *, max_model_len: int) -> float | None:
     return found
 
 
+_FULL_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def require_full_sha(revision: str) -> str:
+    """Return revision if it is a full 40-character commit SHA; raise ValueError otherwise.
+
+    A short revision resolves offline only if the local HF cache happens to hold a refs/<short>
+    file, so a record that names one can't be reproduced elsewhere (Cyril, M3.1).
+    """
+    if not _FULL_SHA.fullmatch(revision):
+        raise ValueError(f"revision {revision!r} is not a full 40-character commit SHA")
+    return revision
+
+
 def port_in_use(port: int) -> bool:
     """True if something already accepts connections on 127.0.0.1:port."""
     with socket.socket() as probe:

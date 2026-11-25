@@ -5,7 +5,7 @@ log reports at least 1x concurrency at max-model-len 4096. A real probe is a ful
 (~50 s), so the search bisects on a 0.01 grid between a `lo` and a `hi`, and records every trial.
 It assumes more memory never makes vLLM fail. Writes results/min_util_<model>.json.
 
-Usage: python -m bench.min_util --llm REPO@REVISION --lo 0.25 --hi 0.40 [--allow-dirty]
+Usage: python -m bench.min_util --llm REPO@FULL_40_CHAR_SHA --lo 0.25 --hi 0.40 [--allow-dirty]
 Refuses a dirty tree unless --allow-dirty (bench/provenance.py).
 """
 
@@ -91,8 +91,9 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, default=Path("results"))
     parser.add_argument("--allow-dirty", action="store_true", help="run on a dirty tree (recorded)")
     args = parser.parse_args()
-    start = provenance.provenance(allow_dirty=args.allow_dirty)  # before touching the GPU
     repo, _, revision = args.llm.partition("@")
+    vllm_server.require_full_sha(revision)  # records name the full commit (Cyril, M3.1)
+    start = provenance.provenance(allow_dirty=args.allow_dirty)  # before touching the GPU
 
     gpu_query = "--query-gpu=name,memory.total,memory.used,driver_version"
     gpu = parse_gpu_query(sh("nvidia-smi", gpu_query, "--format=csv,noheader,nounits"))
