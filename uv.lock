@@ -309,6 +309,7 @@ name = "clinic-voice-agent"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "httpx2" },
     { name = "openai" },
     { name = "pydantic" },
 ]
@@ -328,6 +329,7 @@ gpu = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx2", specifier = ">=2.12,<3" },
     { name = "openai", specifier = ">=3.58,<4" },
     { name = "pydantic", specifier = ">=2.14,<3" },
 ]

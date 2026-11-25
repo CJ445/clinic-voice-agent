@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Hindi/English clinic-booking voice agent with a caller simulator that gates regressions in CI"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+    "httpx2>=2.12,<3",
     "openai>=3.58,<4",
     "pydantic>=2.14,<3",
 ]
