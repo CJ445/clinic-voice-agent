@@ -109,3 +109,30 @@ def test_to_db_time_rejects_naive_and_converts_to_ist() -> None:
         to_db_time(datetime(2026, 11, 30, 9, 0))  # noqa: DTZ001 (naive on purpose)
     utc = datetime.fromisoformat("2026-11-30T03:30:00+00:00")
     assert to_db_time(utc) == "2026-11-30T09:00:00+05:30"
+
+
+def test_db_rejects_booking_a_blocked_slot(db: sqlite3.Connection) -> None:
+    # Cyril's option 3 (M2.1 review): the DB is the safety net; book() also checks first.
+    db.execute("UPDATE slots SET status = 'blocked' WHERE id = 's1'")
+    with pytest.raises(sqlite3.IntegrityError, match="slot is blocked"):
+        book(db, 1, 1, "k1")
+
+
+def test_db_rejects_reactivating_an_appointment_on_a_blocked_slot(db: sqlite3.Connection) -> None:
+    book(db, 1, 1, "k1")
+    db.execute("UPDATE appointments SET status = 'cancelled' WHERE id = 1")
+    db.execute("UPDATE slots SET status = 'blocked' WHERE id = 's1'")
+    with pytest.raises(sqlite3.IntegrityError, match="slot is blocked"):
+        db.execute("UPDATE appointments SET status = 'booked' WHERE id = 1")
+
+
+def test_db_rejects_blocking_a_slot_that_is_booked(db: sqlite3.Connection) -> None:
+    book(db, 1, 1, "k1")
+    with pytest.raises(sqlite3.IntegrityError, match="slot has an active appointment"):
+        db.execute("UPDATE slots SET status = 'blocked' WHERE id = 's1'")
+
+
+def test_blocking_is_allowed_once_the_appointment_is_cancelled(db: sqlite3.Connection) -> None:
+    book(db, 1, 1, "k1")
+    db.execute("UPDATE appointments SET status = 'cancelled' WHERE id = 1")
+    db.execute("UPDATE slots SET status = 'blocked' WHERE id = 's1'")
