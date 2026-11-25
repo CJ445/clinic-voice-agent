@@ -212,7 +212,15 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
             "compute_type": STT_COMPUTE,
             "beam_size": beam,
         },
-        "tts": {"repo": TTS_REPO, "revision": TTS_REVISION, "device": "cpu", "vram_mib": 0},
+        # vram_mib 0 is the expectation for a CPU model, not a measurement (review #7);
+        # the measured change is mib.tts_measured_delta.
+        "tts": {
+            "repo": TTS_REPO,
+            "revision": TTS_REVISION,
+            "device": "cpu",
+            "vram_mib": 0,
+            "measured": False,
+        },
         "mib": mib,
         "fits": ok,
         "error": error,
