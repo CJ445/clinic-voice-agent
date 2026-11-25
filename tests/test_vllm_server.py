@@ -1,4 +1,4 @@
-"""Unit tests for the CPU-testable part of bench/vllm_server.py: reading vLLM's startup log.
+"""Unit tests for the CPU-testable part of agent/vllm_server.py: reading vLLM's startup log.
 
 The minimum-utilization search (PLAN M0.3) accepts a --gpu-memory-utilization only if vLLM's log
 shows at least 1x concurrency at max-model-len 4096. The fixture lines are copied verbatim from a
@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from bench import vllm_server
-from bench.vllm_server import parse_max_concurrency, port_in_use
+from agent import vllm_server
+from agent.vllm_server import parse_max_concurrency, port_in_use
 
 REAL_LOG = (
     "(EngineCore pid=21675) INFO 11-25 02:30:09 [gpu_worker.py:436] "

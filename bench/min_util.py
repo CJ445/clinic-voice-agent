@@ -18,7 +18,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from bench import provenance, vllm_server
+from agent import vllm_server
+from bench import provenance
 from bench.gpu_mem import check_record, parse_compute_apps, parse_gpu_query
 
 STEP = 0.01
