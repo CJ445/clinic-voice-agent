@@ -14,7 +14,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from clinic.clock import Clock
 from clinic.db import from_db_time, to_db_time
@@ -54,11 +54,13 @@ class ToolError(Model):
 class CheckSlotsIn(Model):
     """Find bookable slots. Dates are calendar days in IST, inclusive."""
 
-    doctor: str | None = Field(None, description="Doctor's name, e.g. 'Dr. Sharma'; omit for any")
+    doctor: str | None = Field(
+        default=None, description="Doctor's name, e.g. 'Dr. Sharma'; omit for any"
+    )
     date_from: date
     date_to: date
     part_of_day: PartOfDay | None = None
-    max_results: int = Field(10, ge=1, le=50)
+    max_results: int = Field(default=10, ge=1, le=50)
 
 
 class Slot(Model):
@@ -131,3 +133,146 @@ def check_slots(
             )
         )
     return CheckSlotsOut(slots=slots[: req.max_results], more=len(slots) > req.max_results)
+
+
+def normalize_phone(raw: str) -> str:
+    """Indian mobile number in a common spelling -> '+91XXXXXXXXXX'. Raises ValueError otherwise.
+
+    Accepts digits, spaces and dashes, an optional leading '+', and a 91 or 0 prefix.
+    """
+    text = raw.strip()
+    if text.startswith("+"):
+        text = text[1:]
+    if not text or any(ch not in "0123456789 -" for ch in text):
+        raise ValueError("phone may contain only digits, spaces, dashes and a leading +")
+    digits = text.replace(" ", "").replace("-", "")
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) != 10 or digits[0] not in "6789":
+        raise ValueError("expected a 10-digit Indian mobile number, e.g. 98765 43210")
+    return "+91" + digits
+
+
+class BookIn(Model):
+    """Book one slot. slot_id must come from check_slots; never a free-form date or time."""
+
+    slot_id: str = Field(min_length=1, max_length=40)
+    patient_name: str = Field(min_length=1, max_length=100)
+    phone: str = Field(description="Indian mobile number; normalized to +91XXXXXXXXXX")
+    idempotency_key: str = Field(
+        min_length=1, max_length=100, description="Same key = same booking"
+    )
+
+    @field_validator("patient_name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("patient_name is blank")
+        return " ".join(value.split())
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, value: str) -> str:
+        return normalize_phone(value)
+
+
+class BookOut(Model):
+    ok: Literal[True] = True
+    appointment_id: int
+    slot_id: str
+    doctor: str
+    start: datetime
+    end: datetime
+    patient_name: str
+    replayed: bool = Field(description="True if this idempotency_key had already booked it")
+
+
+def book(conn: sqlite3.Connection, clock: Clock, req: BookIn) -> BookOut | ToolError:
+    """Book req.slot_id, all checks and the insert under one write lock (BEGIN IMMEDIATE).
+
+    A ToolError rolls the transaction back, so a failed call never leaves a partial write.
+    """
+    if conn.in_transaction:
+        raise RuntimeError("book() must start its own transaction; commit or roll back first")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        result = _book(conn, clock, req)
+    except BaseException:
+        conn.rollback()
+        raise
+    if isinstance(result, ToolError):
+        conn.rollback()
+    else:
+        conn.commit()
+    return result
+
+
+def _booked(conn: sqlite3.Connection, appointment_id: int, replayed: bool) -> BookOut:
+    row = conn.execute(
+        """
+        SELECT a.slot_id, d.name, s.start, s.duration_min, p.name
+        FROM appointments a JOIN slots s ON s.id = a.slot_id
+        JOIN doctors d ON d.id = s.doctor_id JOIN patients p ON p.id = a.patient_id
+        WHERE a.id = ?
+        """,
+        (appointment_id,),
+    ).fetchone()
+    slot_id, doctor, start_text, duration, patient = row
+    start = from_db_time(start_text)
+    return BookOut(
+        appointment_id=appointment_id,
+        slot_id=slot_id,
+        doctor=doctor,
+        start=start,
+        end=start + timedelta(minutes=duration),
+        patient_name=patient,
+        replayed=replayed,
+    )
+
+
+def _book(conn: sqlite3.Connection, clock: Clock, req: BookIn) -> BookOut | ToolError:
+    prior = conn.execute(
+        """
+        SELECT a.id, a.slot_id, p.phone, a.status FROM appointments a
+        JOIN patients p ON p.id = a.patient_id WHERE a.idempotency_key = ?
+        """,
+        (req.idempotency_key,),
+    ).fetchone()
+    if prior is not None:
+        appointment_id, slot_id, phone, status = prior
+        if (slot_id, phone, status) == (req.slot_id, req.phone, "booked"):
+            return _booked(conn, appointment_id, replayed=True)
+        return ToolError(
+            code="idempotency_conflict",
+            message="this idempotency_key was already used for a different or cancelled booking",
+        )
+    slot = conn.execute("SELECT status, start FROM slots WHERE id = ?", (req.slot_id,)).fetchone()
+    if slot is None:
+        return ToolError(code="unknown_slot", message="no such slot_id; use one from check_slots")
+    status, start_text = slot
+    if from_db_time(start_text) <= clock.now():
+        return ToolError(code="past_slot", message="that slot has already started")
+    if status == "blocked":
+        return ToolError(code="slot_blocked", message="the doctor is unavailable for that slot")
+    taken = "SELECT 1 FROM appointments WHERE slot_id = ? AND status = 'booked'"
+    if conn.execute(taken, (req.slot_id,)).fetchone() is not None:
+        return ToolError(code="slot_taken", message="that slot is already booked")
+    patient = conn.execute("SELECT id FROM patients WHERE phone = ?", (req.phone,)).fetchone()
+    if patient is None:
+        cursor = conn.execute(
+            "INSERT INTO patients (name, phone) VALUES (?, ?)", (req.patient_name, req.phone)
+        )
+        patient_id = cursor.lastrowid
+    else:
+        patient_id = patient[0]
+    cursor = conn.execute(
+        """
+        INSERT INTO appointments (slot_id, patient_id, status, idempotency_key, created_at)
+        VALUES (?, ?, 'booked', ?, ?)
+        """,
+        (req.slot_id, patient_id, req.idempotency_key, to_db_time(clock.now())),
+    )
+    assert cursor.lastrowid is not None
+    return _booked(conn, cursor.lastrowid, replayed=False)
