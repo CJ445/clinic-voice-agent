@@ -214,7 +214,10 @@ AFTER_MIDNIGHT = [
     ("aaj shaam", AT_0030, "ambiguous: after_midnight"),
     ("kal subah", AT_0400, "2026-12-02 morning"),
     ("aaj shaam", AT_0400, "2026-12-01 evening"),
-    ("parso", AT_0030, "2026-12-03"),  # not in the ruling: calendar rule (logged for Cyril)
+    ("parso", AT_0030, "ambiguous: after_midnight"),  # Cyril at M2 close-out: same as kal
+    ("परसों शाम", AT_0030, "ambiguous: after_midnight"),
+    ("day after tomorrow", AT_0359, "ambiguous: after_midnight"),
+    ("parso", AT_0400, "2026-12-03"),
     ("Friday", AT_0030, "2026-12-04"),
 ]
 
@@ -228,6 +231,13 @@ def test_after_midnight_kal_offers_both_days() -> None:
     result = resolve("kal subah", AT_0030)
     assert isinstance(result, Ambiguous)
     assert [d.isoformat() for d in result.candidates] == ["2026-12-01", "2026-12-02"]
+
+
+def test_after_midnight_parso_offers_both_days() -> None:
+    # At 00:30 on 1 Dec, "parso" may mean 2 Dec (counting from the coming morning) or 3 Dec.
+    result = resolve("parso", AT_0030)
+    assert isinstance(result, Ambiguous)
+    assert [d.isoformat() for d in result.candidates] == ["2026-12-02", "2026-12-03"]
 
 
 def test_the_table_has_at_least_40_cases() -> None:
