@@ -1,13 +1,14 @@
 """SQLite schema for the clinic: doctors, slots, patients, appointments (PLAN M2.1).
 
-The booking invariants live in the database, not only in Python, so they hold even when two
-processes race on the same file:
+The booking invariants live in the database, not only in Python, so they hold for every
+connection, whatever code is writing (concurrent writers are tested in M2.3):
 - one slot holds at most one *active* appointment: a partial UNIQUE index on
   appointments(slot_id) WHERE status = 'booked'. A cancelled appointment frees the slot.
 - whether a slot is booked is derived from appointments only. slots.status is just 'open' or
   'blocked' (doctor unavailable), so the two tables can never disagree.
-- times are ISO 8601 strings in IST with an explicit +05:30 offset; a CHECK rejects anything else,
-  including naive times. One fixed offset also makes string order equal time order.
+- times are ISO 8601 strings in IST with an explicit +05:30 offset; a CHECK (a format check,
+  not full date validation) rejects anything else, including naive times. One fixed offset
+  also makes string order equal time order.
 - every idempotency_key is unique, so a retried book() can find its first appointment.
 """
 
@@ -70,4 +71,9 @@ def to_db_time(moment: datetime) -> str:
 
 
 def from_db_time(text: str) -> datetime:
-    return datetime.fromisoformat(text).astimezone(IST)
+    """Stored form -> aware datetime in IST. Refuses naive text: astimezone() would read it as
+    the server's local time and silently shift it (review of M2.1)."""
+    moment = datetime.fromisoformat(text)
+    if moment.tzinfo is None:
+        raise ValueError(f"refusing naive time {text!r}: slot logic must be timezone-aware")
+    return moment.astimezone(IST)

@@ -28,3 +28,9 @@ def test_system_clock_is_aware_ist() -> None:
 def test_db_time_round_trip() -> None:
     moment = datetime(2026, 11, 30, 23, 30, tzinfo=IST)
     assert from_db_time(to_db_time(moment)) == moment
+
+
+def test_from_db_time_rejects_naive() -> None:
+    # Review: a naive string was read as the server's local time and silently shifted.
+    with pytest.raises(ValueError, match="timezone-aware"):
+        from_db_time("2026-11-30T09:00:00")

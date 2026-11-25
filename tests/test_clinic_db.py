@@ -1,7 +1,8 @@
 """Unit tests for clinic/db.py: the schema enforces the booking invariants itself (PLAN M2.1).
 
 Most tests write raw SQL on purpose: the database must refuse a double booking or a naive
-timestamp even when no Python code is checking, e.g. two processes racing on the same file.
+timestamp even when no Python code is checking. Truly concurrent writers (SQLite's busy/locked
+path) are tested in M2.3, not here.
 """
 
 import sqlite3
@@ -9,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+
 from clinic.clock import IST
 from clinic.db import connect, create_schema, to_db_time
 
@@ -56,7 +58,8 @@ def test_idempotency_key_is_unique(db: sqlite3.Connection) -> None:
         book(db, 2, 2, "same")
 
 
-def test_constraint_holds_across_two_connections(tmp_path: Path) -> None:
+def test_constraint_holds_for_a_second_connection_after_commit(tmp_path: Path) -> None:
+    # Sequential, not a race: a committed booking is enforced for every other connection.
     path = tmp_path / "clinic.db"
     first = connect(path)
     create_schema(first)

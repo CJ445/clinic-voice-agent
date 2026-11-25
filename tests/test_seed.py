@@ -33,9 +33,46 @@ def test_seed_cli_matches_in_process_build(tmp_path: Path) -> None:
 
 
 def test_seed_follows_the_clock(tmp_path: Path) -> None:
-    build(tmp_path / "a.db")
-    build(tmp_path / "later.db", clock=FrozenClock(SEED_NOW + timedelta(days=7)))
-    assert dump(tmp_path / "a.db") != dump(tmp_path / "later.db")
+    # Checks slot data itself: created_at alone would make the dumps differ (review #3).
+    later = SEED_NOW + timedelta(days=7)
+    build(tmp_path / "later.db", clock=FrozenClock(later))
+    starts = [
+        from_db_time(s)
+        for (s,) in sqlite3.connect(tmp_path / "later.db").execute("SELECT start FROM slots")
+    ]
+    assert min(starts).date() == later.date()
+    last_open_day = max(
+        later.date() + timedelta(days=d)
+        for d in range(14)
+        if (later.date() + timedelta(days=d)).weekday() != 6
+    )
+    assert max(starts).date() == last_open_day  # day 14 is a Sunday here: closed
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        datetime(2026, 11, 30, 10, 15, tzinfo=IST),  # Monday mid-morning session
+        datetime(2026, 11, 30, 9, 0, tzinfo=IST),  # exactly on a slot start
+        datetime(2026, 12, 6, 11, 0, tzinfo=IST),  # Sunday: closed today
+        datetime(2026, 12, 5, 21, 0, tzinfo=IST),  # Saturday after the last session
+    ],
+)
+def test_any_clock_gives_only_future_slots_and_valid_bookings(
+    tmp_path: Path, now: datetime
+) -> None:
+    # Review #2: the "skip slots at or before now" branch, and the position-based picks that
+    # depend on it, were never exercised by SEED_NOW (08:00, before every slot).
+    build(tmp_path / "c.db", clock=FrozenClock(now))
+    conn = sqlite3.connect(tmp_path / "c.db")
+    starts = [from_db_time(s) for (s,) in conn.execute("SELECT start FROM slots")]
+    assert min(starts) > now
+    assert not any(s.date() == now.date() for s in starts if now.weekday() == 6)
+    rows = conn.execute(
+        "SELECT s.status, s.start FROM appointments a JOIN slots s ON s.id = a.slot_id"
+    ).fetchall()
+    assert len(rows) == 5
+    assert all(status == "open" and from_db_time(start) > now for status, start in rows)
 
 
 def test_build_refuses_to_overwrite(tmp_path: Path) -> None:
@@ -57,16 +94,15 @@ def test_three_doctors(db: sqlite3.Connection) -> None:
 def test_two_weeks_of_future_slots_no_sundays(db: sqlite3.Connection) -> None:
     starts = [from_db_time(s) for (s,) in db.execute("SELECT start FROM slots")]
     assert starts
-    assert min(starts) >= SEED_NOW
+    assert min(starts) > SEED_NOW
     assert max(starts).date() < SEED_NOW.date() + timedelta(days=14)
     assert {s.date() for s in starts} == {
         SEED_NOW.date() + timedelta(days=d)
         for d in range(14)
         if (SEED_NOW.date() + timedelta(days=d)).weekday() != 6
     }
-    assert all(
-        s.tzinfo is not None and s.utcoffset() == timedelta(hours=5, minutes=30) for s in starts
-    )
+    raw = [s for (s,) in db.execute("SELECT start FROM slots")]
+    assert all(s.endswith("+05:30") for s in raw)  # the stored data, not the helper
 
 
 def test_each_doctor_keeps_their_hours(db: sqlite3.Connection) -> None:
@@ -86,7 +122,7 @@ def test_pre_booked_appointments_sit_on_open_future_slots(db: sqlite3.Connection
         "SELECT a.status, s.status, s.start FROM appointments a JOIN slots s ON s.id = a.slot_id"
     ).fetchall()
     statuses = sorted(a for a, _, _ in rows)
-    assert statuses.count("booked") >= 3 and statuses.count("cancelled") >= 1
+    assert statuses == ["booked"] * 4 + ["cancelled"]
     assert all(slot_status == "open" for _, slot_status, _ in rows)
     assert all(from_db_time(start) > SEED_NOW for _, _, start in rows)
 
