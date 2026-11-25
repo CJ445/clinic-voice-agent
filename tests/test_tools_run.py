@@ -39,7 +39,10 @@ def test_book_then_replay_through_run(conn: sqlite3.Connection, clock: FrozenClo
 
 
 def test_cancel_through_run(conn: sqlite3.Connection, clock: FrozenClock) -> None:
-    assert run(conn, clock, "cancel", {"appointment_id": 1})["status"] == "cancelled"
+    assert (
+        run(conn, clock, "cancel", {"appointment_id": 1, "phone": "9800000001"})["status"]
+        == "cancelled"
+    )
 
 
 @pytest.mark.parametrize(
@@ -158,7 +161,7 @@ def test_programming_errors_still_raise(conn: sqlite3.Connection, clock: FrozenC
     # A caller holding an open transaction is a bug in our code, not bad LLM input: fail loudly.
     conn.execute("UPDATE patients SET name = name")
     with pytest.raises(RuntimeError, match="transaction"):
-        run(conn, clock, "cancel", {"appointment_id": 1})
+        run(conn, clock, "cancel", {"appointment_id": 1, "phone": "9800000001"})
 
 
 @pytest.mark.parametrize(
@@ -179,4 +182,4 @@ def test_other_db_errors_are_not_disguised(
 
     monkeypatch.setattr(clinic.tools, "_cancel", boom)
     with pytest.raises(type(exc)):
-        run(conn, clock, "cancel", {"appointment_id": 1})
+        run(conn, clock, "cancel", {"appointment_id": 1, "phone": "9800000001"})

@@ -281,24 +281,24 @@ def _book(conn: sqlite3.Connection, clock: Clock, req: BookIn) -> BookOut | Tool
 
 
 class CancelIn(Model):
-    """Cancel by appointment_id, or by the patient's phone plus the slot_id. Exactly one way."""
+    """Cancel the caller's appointment: phone plus appointment_id, or phone plus slot_id.
 
+    The phone is always required, so a guessed appointment_id can't cancel someone else's booking.
+    """
+
+    phone: str = Field(description="Caller's mobile number; must match the booking")
     appointment_id: int | None = Field(default=None, ge=1, strict=True)  # true must not become 1
-    phone: str | None = None
     slot_id: str | None = Field(default=None, min_length=1, max_length=40)
 
     @field_validator("phone")
     @classmethod
-    def _phone(cls, value: str | None) -> str | None:
-        return None if value is None else normalize_phone(value)
+    def _phone(cls, value: str) -> str:
+        return normalize_phone(value)
 
     @model_validator(mode="after")
     def _one_way(self) -> "CancelIn":
-        by_id = self.appointment_id is not None
-        by_patient = self.phone is not None and self.slot_id is not None
-        partial = (self.phone is None) != (self.slot_id is None)
-        if by_id == by_patient or partial:
-            raise ValueError("give appointment_id, or phone and slot_id (not both, not neither)")
+        if (self.appointment_id is None) == (self.slot_id is None):
+            raise ValueError("give phone plus exactly one of appointment_id or slot_id")
         return self
 
 
@@ -333,13 +333,13 @@ def _cancel(conn: sqlite3.Connection, clock: Clock, req: CancelIn) -> CancelOut 
         JOIN slots s ON s.id = a.slot_id JOIN patients p ON p.id = a.patient_id
     """
     if req.appointment_id is not None:
-        rows = conn.execute(query + " WHERE a.id = ?", (req.appointment_id,)).fetchall()
+        where, key = " WHERE p.phone = ? AND a.id = ?", req.appointment_id
     else:
-        rows = conn.execute(
-            query + " WHERE p.phone = ? AND a.slot_id = ?", (req.phone, req.slot_id)
-        ).fetchall()
+        where, key = " WHERE p.phone = ? AND a.slot_id = ?", req.slot_id
+    rows = conn.execute(query + where, (req.phone, key)).fetchall()
     if not rows:
-        return ToolError(code="not_found", message="no matching appointment")
+        # Same answer whether the id doesn't exist or belongs to another phone: never confirm it.
+        return ToolError(code="not_found", message="no appointment matches that phone")
     active = [row for row in rows if row[2] == "booked"]  # at most one, by the unique index
     if not active:
         return ToolError(code="already_cancelled", message="that appointment is already cancelled")
