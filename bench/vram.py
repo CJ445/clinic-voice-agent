@@ -18,6 +18,7 @@ import multiprocessing
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -59,19 +60,31 @@ def ram_mib() -> tuple[int, int]:
 
 
 class Peaks:
-    """Samples GPU used MiB and system RAM used MiB once a second; keeps the maximum of each."""
+    """Samples (GPU used MiB, RAM used MiB) every interval_s and keeps the maximum of each.
 
-    def __init__(self) -> None:
-        self.gpu = 0
-        self.ram = 0
+    Fails closed: if any sample raises, sampling stops and `error` is set, so the run fails.
+    A peak that was never measured stays None, never 0 (0 would read as 8,188 MiB headroom).
+    """
+
+    def __init__(self, read: Callable[[], tuple[int, int]], interval_s: float = 1.0) -> None:
+        self.gpu: int | None = None
+        self.ram: int | None = None
+        self.error: str | None = None
+        self._read = read
+        self._interval_s = interval_s
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            self.gpu = max(self.gpu, gpu_used_mib())
-            self.ram = max(self.ram, ram_mib()[1])
-            self._stop.wait(1.0)
+            try:
+                gpu, ram = self._read()
+            except Exception as exc:
+                self.error = "sampler: " + describe_error(exc, home=str(Path.home()))
+                return
+            self.gpu = gpu if self.gpu is None else max(self.gpu, gpu)
+            self.ram = ram if self.ram is None else max(self.ram, ram)
+            self._stop.wait(self._interval_s)
 
     def __enter__(self) -> "Peaks":
         self._thread.start()
@@ -80,6 +93,35 @@ class Peaks:
     def __exit__(self, *exc: object) -> None:
         self._stop.set()
         self._thread.join()
+
+
+def describe_error(exc: BaseException, *, home: str) -> str:
+    """One-line error for the record, home directory replaced by ~ and capped at 300 chars."""
+    return f"{type(exc).__name__}: {exc}".replace(home, "~")[:300]
+
+
+def summarize(
+    at: dict[str, int], *, peak_gpu: int | None, total: int, error: str | None
+) -> tuple[dict[str, int | None], bool]:
+    """Turn per-stage GPU readings into the record's MiB block and the fits verdict.
+
+    `at` holds total GPU MiB read after each stage that completed. Stages never reached are None.
+    Fits only with no error, a measured peak, and headroom >= MIN_HEADROOM_MIB.
+    """
+
+    def change(after: str, before: str) -> int | None:
+        return at[after] - at[before] if after in at and before in at else None
+
+    mib: dict[str, int | None] = {**at}
+    mib["llm"] = change("after_llm", "baseline")
+    mib["stt"] = change("after_stt", "after_llm")
+    mib["tts_measured_delta"] = change("after_tts", "after_stt")
+    mib["peak_used"] = peak_gpu
+    if "after_llm" in at:
+        mib["room_left_after_llm"] = headroom_mib(total_mib=total, peak_used_mib=at["after_llm"])
+    headroom = None if peak_gpu is None else headroom_mib(total_mib=total, peak_used_mib=peak_gpu)
+    mib["headroom"] = headroom
+    return mib, error is None and headroom is not None and fits(headroom)
 
 
 def load_stt() -> Any:
@@ -128,7 +170,7 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
     transcript, reply, reply_samples, error = "", "", 0, None
     proc = vllm_server.start(repo, revision, float(util), log)
     try:
-        with Peaks() as peaks:
+        with Peaks(lambda: (gpu_used_mib(), ram_mib()[1])) as peaks:
             # A model set that does not fit (e.g. STT out of memory) is a result, not a crash:
             # record how far it got and the error, so ADR-0003 sees every option.
             try:
@@ -144,22 +186,12 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
                 reply = vllm_server.chat(SYSTEM, transcript)
                 reply_samples = len(speak(reply))
             except Exception as exc:
-                error = f"{type(exc).__name__}: {exc}".replace(str(Path.home()), "~")[:300]
+                error = describe_error(exc, home=str(Path.home()))
     finally:
         vllm_server.stop(proc)
 
-    def change(after: str, before: str) -> int | None:
-        return at[after] - at[before] if after in at and before in at else None
-
-    mib: dict[str, int | None] = {**at}
-    mib["llm"] = change("after_llm", "baseline")
-    mib["stt"] = change("after_stt", "after_llm")
-    mib["tts_measured_delta"] = change("after_tts", "after_stt")
-    mib["peak_used"] = peaks.gpu
-    if "after_llm" in at:
-        mib["room_left_after_llm"] = headroom_mib(total_mib=total, peak_used_mib=at["after_llm"])
-    headroom = headroom_mib(total_mib=total, peak_used_mib=peaks.gpu)
-    mib["headroom"] = headroom
+    error = error or peaks.error
+    mib, ok = summarize(at, peak_gpu=peaks.gpu, total=total, error=error)
     return {
         "llm": {
             "repo": repo,
@@ -177,7 +209,7 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path) -> dict[str, object]
         },
         "tts": {"repo": TTS_REPO, "revision": TTS_REVISION, "device": "cpu", "vram_mib": 0},
         "mib": mib,
-        "fits": error is None and fits(headroom),
+        "fits": ok,
         "error": error,
         "peak_ram_used_mib": peaks.ram,
         "round_trip": {
