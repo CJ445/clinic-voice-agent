@@ -13,6 +13,8 @@ to pass the caller's words here and say the answer back.
 Ambiguity rules (Cyril, M2.4): "next Friday" said in a week that still has a Friday is
 ambiguous (this week's or next week's?); once the weekday has passed, or on that weekday, it has
 one reading. A bare weekday is the coming one; said on that same weekday, it is ambiguous.
+"the 5th" / "5 tarikh" is the next 5th on or after today; if that month has no such day (the
+31st in November), it is ambiguous. A bare number is not a date: "5 baje" is a time.
 A bare kal/कल is tomorrow (a booking call is future context);
 kal with a past-tense marker (tha, gaya, था...) is ambiguous; कर, a common STT error for कल, is
 ambiguous unless another day word is present (then it is just "do", as in "book kar do").
@@ -72,13 +74,16 @@ for number, names in enumerate(
     WEEKDAYS.update(dict.fromkeys(names.split(), number))
 NEXT = {"next", "agle", "agla", "agli", "अगले", "अगला", "अगली"}
 THIS = {"this", "is", "iss", "coming", "इस"}
+TARIKH = {"tarikh", "tareekh", "tarik", "तारीख", "तारिख"}  # "date", after a number
+ORDINAL = re.compile(r"(\d{1,2})(?:st|nd|rd|th)")
+DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
 WORD = re.compile(r"[0-9a-zऀ-ॿ]+")  # Latin, digits, and the whole Devanagari block
 
 
 def words(text: str) -> list[str]:
     """Lower-cased words, punctuation dropped. Devanagari is NFC-normalised so that the same
     word typed or transcribed two ways compares equal."""
-    text = unicodedata.normalize("NFC", text).lower()
+    text = unicodedata.normalize("NFC", text).lower().translate(DEVANAGARI_DIGITS)
     text = re.sub(r"\bday after tomorrow\b", "parso", text)
     return WORD.findall(text)
 
@@ -96,8 +101,14 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
 
     days: list[date] = []  # one entry per day expression the caller used
     for i, word in enumerate(said):
+        number = day_number(said, i)
         if word in WEEKDAYS:
             day = weekday(WEEKDAYS[word], said[i - 1] if i else "", today)
+            if isinstance(day, Ambiguous):
+                return day
+            days.append(day)
+        elif number is not None:
+            day = day_of_month(number, today)
             if isinstance(day, Ambiguous):
                 return day
             days.append(day)
@@ -144,3 +155,26 @@ def weekday(number: int, before: str, today: date) -> date | Ambiguous:
             "that weekday is today; ask if they mean today or next week", (today, coming)
         )
     return coming
+
+
+def day_number(said: list[str], i: int) -> int | None:
+    """The day number if said[i] names a day of the month ("5th", or "5" before tarikh)."""
+    ordinal = ORDINAL.fullmatch(said[i])
+    if ordinal:
+        return int(ordinal.group(1))
+    if said[i].isdigit() and i + 1 < len(said) and said[i + 1] in TARIKH:
+        return int(said[i])
+    return None
+
+
+def day_of_month(number: int, today: date) -> date | Ambiguous:
+    """The next date on or after today that falls on day `number` of its month."""
+    if not 1 <= number <= 31:
+        return Ambiguous(f"{number} is not a day of the month; ask which date")
+    year, month = today.year, today.month
+    if number < today.day:  # passed this month: next month
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    try:
+        return date(year, month, number)
+    except ValueError:
+        return Ambiguous(f"that month has no day {number}; ask which date")
