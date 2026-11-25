@@ -7,9 +7,20 @@ dependencies = []
 
 [dependency-groups]
 dev = ["ruff>=0.6", "pyright>=1.1.380", "pytest>=8"]
+gpu = [
+    "faster-whisper>=1.2.1",
+    "pocket-tts",
+    "vllm==0.19.1",
+]
 
 [tool.uv]
 package = false
+# uv-managed CPython (same build as CI) ships Python.h, which Triton needs to start vLLM;
+# the system /usr/bin/python3.11 has no dev headers.
+python-preference = "only-managed"
+
+[tool.uv.sources]
+pocket-tts = { git = "https://github.com/kyutai-labs/pocket-tts", rev = "0c2db3bdea7c991c568989cc11b503f14483fabc" }
 
 [tool.ruff]
 line-length = 100

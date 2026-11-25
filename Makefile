@@ -1,7 +1,7 @@
-.PHONY: setup lint format types test check eval-text eval-audio bench gate
+.PHONY: setup lint format types test check eval-text eval-audio bench vram gate
 
 setup:
-	uv sync --locked
+	uv sync --locked --group gpu  # plain `uv sync` would uninstall the gpu group
 	@command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv || echo "no GPU visible"
 
 lint:
@@ -29,6 +29,14 @@ eval-text:
 eval-audio:
 	@test -f sim/run.py || (echo "eval-audio: not implemented yet (PLAN M5.6)"; exit 1)
 	uv run python -m sim.run --mode audio --subset nightly --out results/eval_audio.json
+
+# GPU co-residency smoke test (PLAN M0.3). LLMS = space-separated REPO@REVISION:UTIL specs,
+# with UTIL from the minimum-utilization search. BEAM = 5 is provisional (Cyril, 2026-11-25),
+# to be revisited with latency numbers in M7.
+BEAM ?= 5
+vram:
+	@test -n "$(LLMS)" || (echo "vram: set LLMS='REPO@REVISION:UTIL ...'"; exit 1)
+	uv run python -m bench.vram --beam-size $(BEAM) $(foreach spec,$(LLMS),--llm $(spec))
 
 bench:
 	@test -f bench/latency.py || (echo "bench: not implemented yet (PLAN M4.2)"; exit 1)
