@@ -15,6 +15,9 @@ gpu = [
 
 [tool.uv]
 package = false
+# uv-managed CPython (same build as CI) ships Python.h, which Triton needs to start vLLM;
+# the system /usr/bin/python3.11 has no dev headers.
+python-preference = "only-managed"
 
 [tool.uv.sources]
 pocket-tts = { git = "https://github.com/kyutai-labs/pocket-tts", rev = "0c2db3b" }
