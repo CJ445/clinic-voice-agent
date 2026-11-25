@@ -122,8 +122,9 @@ def summarize(
     # Headroom only means something for the full set under load: every stage loaded, the round
     # trip finished, and the peak was measured. Otherwise null; room_left_after_llm still shows
     # what the LLM alone left (review #5).
-    complete = error is None and peak_gpu is not None and "after_tts" in at
-    headroom = headroom_mib(total_mib=total, peak_used_mib=peak_gpu) if complete else None
+    headroom = None
+    if error is None and peak_gpu is not None and "after_tts" in at:
+        headroom = headroom_mib(total_mib=total, peak_used_mib=peak_gpu)
     mib["headroom"] = headroom
     return mib, headroom is not None and fits(headroom)
 
