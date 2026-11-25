@@ -5,7 +5,8 @@ log reports at least 1x concurrency at max-model-len 4096. A real probe is a ful
 (~50 s), so the search bisects on a 0.01 grid between a `lo` and a `hi`, and records every trial.
 It assumes more memory never makes vLLM fail. Writes results/min_util_<model>.json.
 
-Usage: python -m bench.min_util --llm REPO@REVISION --lo 0.25 --hi 0.40
+Usage: python -m bench.min_util --llm REPO@REVISION --lo 0.25 --hi 0.40 [--allow-dirty]
+Refuses a dirty tree unless --allow-dirty (bench/provenance.py).
 """
 
 import argparse
@@ -17,11 +18,15 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from bench import vllm_server
+from bench import provenance, vllm_server
 from bench.gpu_mem import check_record, parse_compute_apps, parse_gpu_query
 
 STEP = 0.01
 Probe = Callable[[float], float | None]
+
+
+def sh(*cmd: str) -> str:
+    return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
 
 
 def find_min_util(probe: Probe, *, lo: float, hi: float) -> tuple[float | None, list[dict]]:
@@ -83,18 +88,16 @@ def main() -> None:
     parser.add_argument("--lo", type=float, required=True, help="a utilization expected to fail")
     parser.add_argument("--hi", type=float, required=True, help="a utilization expected to pass")
     parser.add_argument("--out-dir", type=Path, default=Path("results"))
+    parser.add_argument("--allow-dirty", action="store_true", help="run on a dirty tree (recorded)")
     args = parser.parse_args()
+    start = provenance.provenance(allow_dirty=args.allow_dirty)  # before touching the GPU
     repo, _, revision = args.llm.partition("@")
-
-    def sh(*cmd: str) -> str:
-        return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
 
     gpu_query = "--query-gpu=name,memory.total,memory.used,driver_version"
     gpu = parse_gpu_query(sh("nvidia-smi", gpu_query, "--format=csv,noheader,nounits"))
     best, trials = find_min_util(vllm_probe(repo, revision, args.out_dir), lo=args.lo, hi=args.hi)
     record = {
-        "commit": sh("git", "rev-parse", "--short", "HEAD").strip(),
-        "dirty": bool(sh("git", "status", "--porcelain").strip()),
+        **provenance.finish(start),
         "command": "python -m bench.min_util " + " ".join(sys.argv[1:]),
         "date_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "gpu": gpu.name,

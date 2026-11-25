@@ -2,6 +2,7 @@
 
 setup:
 	uv sync --locked --group gpu  # plain `uv sync` would uninstall the gpu group
+	git config core.hooksPath .githooks  # pre-commit runs make check (F-002)
 	@command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv || echo "no GPU visible"
 
 lint:
@@ -36,7 +37,7 @@ eval-audio:
 BEAM ?= 5
 vram:
 	@test -n "$(LLMS)" || (echo "vram: set LLMS='REPO@REVISION:UTIL ...'"; exit 1)
-	uv run python -m bench.vram --beam-size $(BEAM) $(foreach spec,$(LLMS),--llm $(spec))
+	uv run python -m bench.vram --beam-size $(BEAM) $(foreach spec,$(LLMS),--llm $(spec)) $(if $(ALLOW_DIRTY),--allow-dirty)
 
 bench:
 	@test -f bench/latency.py || (echo "bench: not implemented yet (PLAN M4.2)"; exit 1)
