@@ -5,15 +5,25 @@ The model is an argument because the LLM choice is still open (ADR-0003). The
 bench.min_util published for the same REPO@REVISION, plus UTIL_MARGIN. An unmeasured model is
 refused, so nothing can be served at a share nobody checked. `--util` overrides the lookup and is
 printed as an override.
+
+Usage: python -m agent.serve --llm REPO@FULL_40_CHAR_SHA [--util X]   (or `make serve LLM=...`)
+Prints the VRAM budget, starts vLLM with tool calling, waits for /health, sends one warm-up
+completion, then serves until Ctrl-C or SIGTERM and stops vLLM's whole process group.
 """
 
+import argparse
 import json
+import signal
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 
 from agent import vllm_server
 
 RECORDS = Path("results/published")
+LOG = Path("results/vllm_serve.log")
 # Policy (Cyril, M3.1; to be recorded in ADR-0003): serve 0.02 above the measured minimum, so a
 # run-to-run wobble in vLLM's startup memory doesn't leave the KV cache short of one request.
 UTIL_MARGIN = 0.02
@@ -57,7 +67,7 @@ def choose_util(repo: str, revision: str, *, override: float | None, records: Pa
 
 
 def budget(chosen: ServedUtil, *, total_mib: int) -> str:
-    """Say how much VRAM vLLM will reserve and what is left for STT/TTS and headroom."""
+    """Say what share of VRAM vLLM gets and the most that can be left for STT/TTS and headroom."""
     reserved = round(chosen.util * total_mib)
     if chosen.override:
         origin = "--util override"
@@ -65,6 +75,45 @@ def budget(chosen: ServedUtil, *, total_mib: int) -> str:
         origin = f"measured {chosen.measured} + margin {UTIL_MARGIN} ({chosen.source})"
     return (
         f"gpu-memory-utilization {chosen.util}: {origin}\n"
-        f"vLLM reserves {reserved} MiB of {total_mib} MiB; {total_mib - reserved} MiB left for "
-        "STT, TTS and headroom (computed, not measured)"
+        f"vLLM's share is {reserved} MiB of {total_mib} MiB, so at most {total_mib - reserved} MiB "
+        "left for STT, TTS and headroom (computed, not measured: the vLLM process also uses memory "
+        "outside its share, so the real remainder is smaller; make vram measures it)"
     )
+
+
+def total_mib() -> int:
+    """Total VRAM of GPU 0, from nvidia-smi."""
+    query = ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"]
+    return int(subprocess.run(query, check=True, capture_output=True, text=True).stdout.split()[0])
+
+
+def _sigterm_as_interrupt(signum: int, frame: FrameType | None) -> None:
+    raise KeyboardInterrupt
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Serve the dialogue LLM with vLLM (PLAN M3.1)")
+    parser.add_argument("--llm", required=True, help="REPO@FULL_40_CHAR_SHA")
+    parser.add_argument("--util", type=float, help="override the published minimum + margin")
+    args = parser.parse_args()
+    repo, _, revision = args.llm.partition("@")
+    chosen = choose_util(repo, revision, override=args.util, records=RECORDS)
+    print(budget(chosen, total_mib=total_mib()), flush=True)
+    proc = vllm_server.start(repo, revision, chosen.util, LOG, tools=True)
+    signal.signal(signal.SIGTERM, _sigterm_as_interrupt)
+    try:
+        vllm_server.wait_ready(proc)
+        # Warm-up: the first request pays one-off costs that a caller's first turn should not.
+        vllm_server.chat("Reply with one word.", "Hello", max_tokens=1)
+        print(f"ready: {vllm_server.BASE_URL}/v1 model 'llm' = {repo}@{revision} (log {LOG})")
+        sys.stdout.flush()
+        code = proc.wait()
+        sys.exit(f"vLLM exited on its own with code {code}; see {LOG}")
+    except KeyboardInterrupt:
+        print("stopping vLLM", flush=True)
+    finally:
+        vllm_server.stop(proc)
+
+
+if __name__ == "__main__":
+    main()

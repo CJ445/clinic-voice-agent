@@ -166,3 +166,13 @@ def test_short_or_named_revisions_are_refused(revision: str) -> None:
     # refs/<short> file, so records must name the full commit.
     with pytest.raises(ValueError, match="40"):
         vllm_server.require_full_sha(revision)
+
+
+def test_tool_calling_flags_only_when_asked() -> None:
+    # The bench's measured command line must not change; the serve script asks for tools=True.
+    # hermes reads the <tool_call> JSON blocks the Qwen2.5 and Qwen3-2507 templates emit.
+    plain = vllm_server.server_command("some/model", "rev", 0.5)
+    served = vllm_server.server_command("some/model", "rev", 0.5, tools=True)
+    assert "--enable-auto-tool-choice" not in plain and "--tool-call-parser" not in plain
+    assert served[: len(plain)] == plain
+    assert served[len(plain) :] == ["--enable-auto-tool-choice", "--tool-call-parser", "hermes"]

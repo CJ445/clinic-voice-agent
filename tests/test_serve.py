@@ -86,8 +86,24 @@ def test_budget_is_labelled_computed_not_measured() -> None:
     text = serve.budget(serve.ServedUtil(0.5, 0.48, "x.json", False), total_mib=8000)
     assert "4000 MiB" in text and "4000 MiB left" in text
     assert "computed, not measured" in text
+    # Live run, 2026-11-25: vLLM used more than util x total (CUDA context, graphs), so the
+    # remainder is an upper bound and must say so.
+    assert "at most" in text and "outside its share" in text
 
 
 def test_budget_names_an_override() -> None:
     text = serve.budget(serve.ServedUtil(0.7, None, "--util", True), total_mib=8000)
     assert "override" in text
+
+
+def test_main_refuses_an_unmeasured_model_before_starting_vllm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def must_not_start(*args: object, **kwargs: object) -> None:
+        raise AssertionError("started vLLM for an unmeasured model")
+
+    monkeypatch.setattr(serve, "RECORDS", tmp_path)
+    monkeypatch.setattr(serve.vllm_server, "start", must_not_start)
+    monkeypatch.setattr("sys.argv", ["agent.serve", "--llm", f"{REPO}@{FULL}"])
+    with pytest.raises(LookupError, match="no measured minimum"):
+        serve.main()

@@ -1,6 +1,6 @@
 """Start, health-check, query and stop a local `vllm serve` process.
 
-Used by bench/vram.py now and by the M3.1 serve script later. vLLM pre-allocates VRAM when it
+Used by agent/serve.py (PLAN M3.1) and by the bench scripts. vLLM pre-allocates VRAM when it
 starts, so callers must start it before loading any other GPU model (gpu-budget skill).
 Stdlib only, so it type-checks in CI where the gpu dependency group is not installed.
 """
@@ -59,13 +59,16 @@ def port_in_use(port: int) -> bool:
         return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
-def server_command(repo: str, revision: str, util: float) -> list[str]:
+def server_command(repo: str, revision: str, util: float, *, tools: bool = False) -> list[str]:
     """The `vllm serve` command line. No --enforce-eager, so CUDA graphs stay on.
 
     Bound to 127.0.0.1: the bench server has no authentication, so it must not listen on
-    every network interface while it runs.
+    every network interface while it runs. tools=True (the serve script) adds tool calling
+    with vLLM's hermes parser, which reads the <tool_call>{"name", "arguments"}</tool_call>
+    blocks the Qwen2.5 and Qwen3-2507 chat templates emit; the bench leaves it off so its
+    measured command line stays the same.
     """
-    return [
+    command = [
         sys.executable,
         "-m",
         "vllm.entrypoints.openai.api_server",
@@ -84,9 +87,14 @@ def server_command(repo: str, revision: str, util: float) -> list[str]:
         "--max-model-len",
         str(MAX_MODEL_LEN),
     ]
+    if tools:
+        command += ["--enable-auto-tool-choice", "--tool-call-parser", "hermes"]
+    return command
 
 
-def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[bytes]:
+def start(
+    repo: str, revision: str, util: float, log: Path, *, tools: bool = False
+) -> subprocess.Popen[bytes]:
     """Launch the OpenAI-compatible server in its own session.
 
     Refuses if the port is already taken: a stale server there would answer /health and
@@ -97,7 +105,7 @@ def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[
         raise RuntimeError(f"port {PORT} is already in use; stop the server holding it first")
     # New session so stop() can kill vLLM's engine child process too, not just the server.
     return subprocess.Popen(
-        server_command(repo, revision, util),
+        server_command(repo, revision, util, tools=tools),
         stdout=log.open("wb"),
         stderr=subprocess.STDOUT,
         start_new_session=True,
