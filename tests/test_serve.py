@@ -143,3 +143,16 @@ def test_measured_plus_margin_is_also_capped(tmp_path: Path) -> None:
     write_record(tmp_path, "a", REPO, FULL[:10], 0.94)
     with pytest.raises(ValueError, match="0.95"):
         serve.choose_util(REPO, FULL, override=None, records=tmp_path)
+
+
+def test_published_served_record_is_what_serve_would_use() -> None:
+    # Review (ADR-0003 PR) #1: if bench.min_util's minimum moves, agent.serve's util moves with it
+    # and the measured served record goes stale. This makes that drift fail CI.
+    path = Path("results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json")
+    llm_run = json.loads(path.read_text())["runs"][0]["llm"]
+    chosen = serve.choose_util(
+        llm_run["repo"], llm_run["revision"], override=None, records=serve.RECORDS
+    )
+    assert llm_run["gpu_memory_utilization"] == chosen.util
+    assert llm_run["tool_calling"] is True
+    assert "--tool-call-parser" in llm_run["argv"]

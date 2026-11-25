@@ -127,8 +127,11 @@ TODO(Cyril)
     were required).
   - `results/published/vram_Qwen3-4B-Instruct-2507-AWQ-4bit.json`: commit `c9d35d8`, clean, at
     the measured minimum, without tool calling.
-  - `results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json`: commit `674fa44`, clean,
-    the configuration `agent.serve` runs: `llm.tool_calling` true (the same vLLM command line)
-    and the utilization from `agent.serve.choose_util` (measured minimum + `UTIL_MARGIN`).
+  - `results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json`: commit `27d99b6`, clean,
+    the configuration `agent.serve` runs. `llm.argv` is the vLLM command actually launched
+    (tool-calling flags included). The utilization was computed with `agent.serve.choose_util`
+    (the `min_util` record above + `UTIL_MARGIN`) and passed on the command line;
+    `tests/test_serve.py` fails if it stops matching what `choose_util` returns.
 - Serve-script policies to weigh in the Decision (`agent/serve.py`, Cyril, M3.1): `UTIL_MARGIN`
-  (served utilization = measured minimum + 0.02) and `MAX_UTIL` (0.95 cap).
+  (added to the measured minimum) and `MAX_UTIL` (the highest utilization served); values in
+  the code.
