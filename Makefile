@@ -2,6 +2,7 @@
 
 setup:
 	uv sync --locked --group gpu  # plain `uv sync` would uninstall the gpu group
+	git config core.hooksPath .githooks  # pre-commit runs make check (F-002)
 	@command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv || echo "no GPU visible"
 
 lint:

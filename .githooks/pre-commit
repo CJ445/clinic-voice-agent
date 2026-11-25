@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Gate G1 before every commit (F-002): the commit fails if `make check` fails.
+# Enabled by `make setup` (git config core.hooksPath .githooks). Never bypass with --no-verify.
+set -euo pipefail
+echo "pre-commit: make check (G1)"
+make check
