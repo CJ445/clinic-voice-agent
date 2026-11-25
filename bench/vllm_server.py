@@ -9,6 +9,7 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -33,8 +34,21 @@ def parse_max_concurrency(log_text: str, *, max_model_len: int) -> float | None:
     return found
 
 
+def port_in_use(port: int) -> bool:
+    """True if something already accepts connections on 127.0.0.1:port."""
+    with socket.socket() as probe:
+        probe.settimeout(1)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
 def start(repo: str, revision: str, util: float, log: Path) -> subprocess.Popen[bytes]:
-    """Launch the OpenAI-compatible server. No --enforce-eager, so CUDA graphs stay on."""
+    """Launch the OpenAI-compatible server. No --enforce-eager, so CUDA graphs stay on.
+
+    Refuses if the port is already taken: a stale server there would answer /health and
+    wait_ready would accept it as ours (review #9).
+    """
+    if port_in_use(PORT):
+        raise RuntimeError(f"port {PORT} is already in use; stop the server holding it first")
     cmd = [
         sys.executable,
         "-m",

@@ -5,9 +5,13 @@ shows at least 1x concurrency at max-model-len 4096. The fixture lines are copie
 real vLLM 0.19.1 start of Qwen2.5-3B-Instruct-AWQ at 0.40 on the RTX 4060 (2026-11-25).
 """
 
+import socket
+from pathlib import Path
+
 import pytest
 
-from bench.vllm_server import parse_max_concurrency
+from bench import vllm_server
+from bench.vllm_server import parse_max_concurrency, port_in_use
 
 REAL_LOG = (
     "(EngineCore pid=21675) INFO 11-25 02:30:09 [gpu_worker.py:436] "
@@ -43,3 +47,24 @@ def test_last_matching_line_wins() -> None:
     # One log file per run is the rule, but if two starts were appended, trust the latest.
     log = REAL_LOG + "Maximum concurrency for 4,096 tokens per request: 1.20x\n"
     assert parse_max_concurrency(log, max_model_len=4096) == pytest.approx(1.20)
+
+
+def test_port_in_use_detects_a_listener() -> None:
+    # Review #9: a stale server on vLLM's port would answer /health and pass wait_ready.
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        assert port_in_use(port) is True
+    assert port_in_use(port) is False
+
+
+def test_start_refuses_when_port_is_taken(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        monkeypatch.setattr(vllm_server, "PORT", port)
+        with pytest.raises(RuntimeError, match=str(port)):
+            vllm_server.start("some/model", "rev", 0.5, tmp_path / "vllm.log")
+    assert not (tmp_path / "vllm.log").exists()  # refused before launching anything
