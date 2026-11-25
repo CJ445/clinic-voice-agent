@@ -49,8 +49,10 @@ Interview gold. One entry per real problem. Be specific: symptoms, numbers, wron
      The correct test would be `[ $? -eq 0 ]`.
 - **Fix:** every commit since then runs as `if make check > log 2>&1; then git commit …; fi`.
   Claude caught both and disclosed them in the session; Cyril chose fix-forward.
-- **Guard added:** *none yet. Proposed and approved as a follow-up PR (`chore/precommit-gate`):*
-  a `.githooks/pre-commit` running `make check` with `set -euo pipefail`, enabled by `make
-  setup` (`git config core.hooksPath .githooks`). CI's `check` job remains the backstop.
+- **Guard added:** pre-commit hook (`0474729`): `.githooks/pre-commit` runs `make check` under
+  `set -euo pipefail`, enabled by `make setup` (`git config core.hooksPath .githooks`). Proved
+  by a staged unused import being refused. It checks the working tree, not only the staged
+  content; CI's `check` job remains the backstop. Related: bench scripts now refuse a dirty
+  tree unless `--allow-dirty` (`f2b7300`).
 - **Lesson:** a gate that depends on how the command is typed is not a gate. Make the commit
   itself fail.
