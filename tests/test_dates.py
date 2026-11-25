@@ -89,6 +89,8 @@ WEEKDAYS = [
     ("Monday", MON, "ambiguous: today"),  # bare weekday said on that weekday
     ("kal friday", MON, "ambiguous: more than one day"),
     ("agle hafte", MON, "ambiguous: no day"),  # "next week" names no day
+    ("sun lijiye, kal shaam", MON, "2026-12-01 evening"),  # "sun" = listen, not Sunday
+    ("kal sat baje", MON, "2026-12-01"),  # "sat" = seven (saat), not Saturday
 ]
 
 

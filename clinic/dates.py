@@ -55,7 +55,8 @@ PARTS: dict[PartOfDay, set[str]] = {
     "afternoon": {"dopahar", "dopehar", "afternoon", "दोपहर"},
     "evening": {"shaam", "sham", "evening", "शाम"},
 }
-# Monday = 0, as date.weekday(). Romanised spellings as callers and STT write them.
+# Monday = 0, as date.weekday(). Romanised spellings as callers and STT write them. No "sat" or
+# "sun": in Hinglish they are "seven" (saat) and "listen" (sun lo).
 WEEKDAYS: dict[str, int] = {}
 for number, names in enumerate(
     [
@@ -64,8 +65,8 @@ for number, names in enumerate(
         "wednesday wed budhvar budhwar बुधवार",
         "thursday thu thur thurs guruvar guruwar brihaspativar veervar गुरुवार बृहस्पतिवार",
         "friday fri shukravar shukrawar शुक्रवार",
-        "saturday sat shanivar shaniwar शनिवार",
-        "sunday sun ravivar raviwar itvaar itwar रविवार इतवार",
+        "saturday shanivar shaniwar शनिवार",
+        "sunday ravivar raviwar itvaar itwar रविवार इतवार",
     ]
 ):
     WEEKDAYS.update(dict.fromkeys(names.split(), number))
