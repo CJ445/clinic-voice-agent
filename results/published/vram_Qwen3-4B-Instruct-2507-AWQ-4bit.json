@@ -1,0 +1,63 @@
+{
+  "commit": "c9d35d8",
+  "dirty": false,
+  "allow_dirty": false,
+  "command": "python -m bench.vram --beam-size 5 --llm cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit@b37d1ccb77e27a70fe4222d995fda27940eead5a:0.59",
+  "date_utc": "2026-11-25T16:33:51+00:00",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "driver": "570.207",
+  "torch_cuda": "12.8",
+  "total_mib": 8188,
+  "ram_total_mib": 15274,
+  "min_headroom_mib": 500,
+  "sampling": {
+    "interval_s": 1.0,
+    "note": "peak_used is sampled, so spikes shorter than interval_s can be missed: headroom is an upper bound"
+  },
+  "runs": [
+    {
+      "llm": {
+        "repo": "cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit",
+        "revision": "b37d1ccb77e27a70fe4222d995fda27940eead5a",
+        "gpu_memory_utilization": 0.59,
+        "max_model_len": 4096,
+        "cuda_graphs": true
+      },
+      "stt": {
+        "repo": "Systran/faster-whisper-large-v3",
+        "revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
+        "device": "cuda",
+        "compute_type": "int8_float16",
+        "beam_size": 5
+      },
+      "tts": {
+        "repo": "Indus-Labs/indus-pocket-tts",
+        "revision": "39899d3c1dcda47a7ef167cd222419feb86abeb9",
+        "device": "cpu",
+        "vram_mib": 0,
+        "measured": false
+      },
+      "mib": {
+        "baseline": 11,
+        "after_llm": 5493,
+        "after_stt": 7092,
+        "after_tts": 7092,
+        "llm": 5482,
+        "stt": 1599,
+        "tts_measured_delta": 0,
+        "peak_used": 7462,
+        "room_left_after_llm": 2695,
+        "headroom": 726
+      },
+      "fits": true,
+      "error": null,
+      "peak_ram_used_mib": 10441,
+      "round_trip": {
+        "transcript": "नमस्ते मुझे कर शाम डॉक्टर शर्मा के साथ अपॉइंडमिन चाहिए",
+        "reply": "आपको डॉ. शर्मा के साथ शाम के अपॉइंटमेंट के लिए रिकॉर्ड कराया जाएगा",
+        "reply_tts_samples": 92160,
+        "ok": true
+      }
+    }
+  ]
+}
