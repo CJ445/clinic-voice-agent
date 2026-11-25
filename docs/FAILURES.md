@@ -32,3 +32,25 @@ Interview gold. One entry per real problem. Be specific: symptoms, numbers, wron
   `bench/vllm_server.start` + `wait_ready` succeeded (the M0.3 smoke run), never `import vllm`.
 - **Lesson:** an import is not a start. Check the thing at the level it will actually be used.
   And never rename a venv; rebuild it where it will live.
+
+## F-002 — Gate G1 bypassed twice before commits
+
+- **Date / milestone:** 2026-11-25, M0.3 (fixes for the first `/review`)
+- **Symptom:** `a4ab698` was committed with a pyright error (`"int | None"` passed to
+  `headroom_mib`), so the commit's own `make check` was red. Fixed forward in `f6a5edf`, no
+  history rewrite. Separately, `65fe9cf` was committed behind a guard that could never fail.
+  Its gate happened to pass (exit 0), but nothing would have stopped it if it hadn't.
+- **Wrong hypotheses:** none about the cause. Claude believed each command "ran the gate
+  before committing"; it ran the gate but didn't act on its result.
+- **Root cause:** the gate relied on discipline, not on a mechanism.
+  1. `make check 2>&1 | grep … | head && git commit …`: a pipeline's exit status is its last
+     command's (`head`, always 0), so `&&` committed regardless.
+  2. `[ $? ]` tests that the string is non-empty, which it always is, so it is always true.
+     The correct test would be `[ $? -eq 0 ]`.
+- **Fix:** every commit since then runs as `if make check > log 2>&1; then git commit …; fi`.
+  Claude caught both and disclosed them in the session; Cyril chose fix-forward.
+- **Guard added:** *none yet. Proposed and approved as a follow-up PR (`chore/precommit-gate`):*
+  a `.githooks/pre-commit` running `make check` with `set -euo pipefail`, enabled by `make
+  setup` (`git config core.hooksPath .githooks`). CI's `check` job remains the backstop.
+- **Lesson:** a gate that depends on how the command is typed is not a gate. Make the commit
+  itself fail.

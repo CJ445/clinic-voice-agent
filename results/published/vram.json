@@ -1,35 +1,40 @@
 {
-  "commit": "4c1d4cc",
+  "commit": "1c71cb2",
   "dirty": false,
-  "command": "python -m bench.vram --beam-size 5 --llm Qwen/Qwen2.5-3B-Instruct-AWQ@3559b226e8:0.36 --llm Qwen/Qwen2.5-7B-Instruct-AWQ@b25037543e:0.80",
-  "date_utc": "2026-11-25T08:00:28+00:00",
+  "command": "python -m bench.vram --beam-size 5 --llm Qwen/Qwen2.5-3B-Instruct-AWQ@3559b226e8ce77211e2c1bd7ddfb7686fec4d6dd:0.36 --llm Qwen/Qwen2.5-7B-Instruct-AWQ@b25037543e9394b818fdfca67ab2a00ecc7dd641:0.80",
+  "date_utc": "2026-11-25T08:47:14+00:00",
   "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
   "driver": "570.207",
   "torch_cuda": "12.8",
   "total_mib": 8188,
   "ram_total_mib": 15274,
   "min_headroom_mib": 500,
+  "sampling": {
+    "interval_s": 1.0,
+    "note": "peak_used is sampled, so spikes shorter than interval_s can be missed: headroom is an upper bound"
+  },
   "runs": [
     {
       "llm": {
         "repo": "Qwen/Qwen2.5-3B-Instruct-AWQ",
-        "revision": "3559b226e8",
+        "revision": "3559b226e8ce77211e2c1bd7ddfb7686fec4d6dd",
         "gpu_memory_utilization": 0.36,
         "max_model_len": 4096,
         "cuda_graphs": true
       },
       "stt": {
         "repo": "Systran/faster-whisper-large-v3",
-        "revision": "edaa852ec7",
+        "revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
         "device": "cuda",
         "compute_type": "int8_float16",
         "beam_size": 5
       },
       "tts": {
         "repo": "Indus-Labs/indus-pocket-tts",
-        "revision": "39899d3c1d",
+        "revision": "39899d3c1dcda47a7ef167cd222419feb86abeb9",
         "device": "cpu",
-        "vram_mib": 0
+        "vram_mib": 0,
+        "measured": false
       },
       "mib": {
         "baseline": 11,
@@ -39,13 +44,13 @@
         "llm": 3642,
         "stt": 1599,
         "tts_measured_delta": 0,
-        "peak_used": 5430,
+        "peak_used": 5336,
         "room_left_after_llm": 4535,
-        "headroom": 2758
+        "headroom": 2852
       },
       "fits": true,
       "error": null,
-      "peak_ram_used_mib": 8118,
+      "peak_ram_used_mib": 8955,
       "round_trip": {
         "transcript": "नमस्ते मुझे कर शाम डॉक्टर शर्मा के साथ अपॉइंडमिन चाहिए",
         "reply": "namaste_m_m_sharma_sham_ka_sharam_aapni_sharam_aapni_chahi_sey",
@@ -56,23 +61,24 @@
     {
       "llm": {
         "repo": "Qwen/Qwen2.5-7B-Instruct-AWQ",
-        "revision": "b25037543e",
+        "revision": "b25037543e9394b818fdfca67ab2a00ecc7dd641",
         "gpu_memory_utilization": 0.8,
         "max_model_len": 4096,
         "cuda_graphs": true
       },
       "stt": {
         "repo": "Systran/faster-whisper-large-v3",
-        "revision": "edaa852ec7",
+        "revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
         "device": "cuda",
         "compute_type": "int8_float16",
         "beam_size": 5
       },
       "tts": {
         "repo": "Indus-Labs/indus-pocket-tts",
-        "revision": "39899d3c1d",
+        "revision": "39899d3c1dcda47a7ef167cd222419feb86abeb9",
         "device": "cpu",
-        "vram_mib": 0
+        "vram_mib": 0,
+        "measured": false
       },
       "mib": {
         "baseline": 11,
@@ -82,11 +88,11 @@
         "tts_measured_delta": null,
         "peak_used": 7234,
         "room_left_after_llm": 1049,
-        "headroom": 954
+        "headroom": null
       },
       "fits": false,
       "error": "RuntimeError: CUDA failed with error out of memory",
-      "peak_ram_used_mib": 7424,
+      "peak_ram_used_mib": 8600,
       "round_trip": {
         "transcript": "",
         "reply": "",

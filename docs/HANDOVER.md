@@ -14,14 +14,21 @@ then checked by Cyril. The next session starts by reading the top entry.
     pocket-tts pinned git commit → `ac4319e` `make vram` → `7a5bb24` uv-managed Python (F-001)
     + `tests/test_env.py` guard → `c99518d` concurrency-line parser → `0a764e5`
     min-utilization search → `4c1d4cc` record a set that doesn't fit instead of crashing.
+  - **First `/review`: 0 must-fix.** Fixed on Cyril's call: `37f61c3` fail closed on a sampler
+    error (#1, #6) → `a4ab698` + `f6a5edf` headroom `null` unless the full set ran (#5) →
+    `3866b39` port-free check (#9) → `0d5ae11` kill vLLM's process group (#3) → `65fe9cf` TTS
+    `"measured": false` (#7) → `34d7dc7` 1 Hz / upper-bound note (#2) → `cea09af` full
+    revision SHAs → `1c71cb2` publish `min_util` results (#8). F-002 logs two gate slips.
   - **Minimum utilization** (`python -m bench.min_util`, commit `0a764e5`, clean;
-    `results/min_util_*.json`, local only): Qwen2.5-3B-Instruct-AWQ **0.36**, Qwen2.5-7B-
+    `results/published/min_util_*.json`): Qwen2.5-3B-Instruct-AWQ **0.36**, Qwen2.5-7B-
     Instruct-AWQ **0.80**. Rule: vLLM ready and ≥ 1x concurrency at max-model-len 4096, CUDA
     graphs on. Every trial is in the JSON.
-  - **Co-residency** (`results/published/vram.json`, commit `4c1d4cc`, clean; command in the
-    file): 3B + Whisper large-v3 `int8_float16` beam 5 + Indus Pocket TTS (CPU, +0 MiB)
-    **fits, 2,758 MiB headroom**, round trip completed. 7B: Whisper **out of memory** after
-    vLLM left 1,049 MiB; recorded as `"fits": false`. Checked: no home path or username in it.
+  - **Co-residency** (`results/published/vram.json`, commit `1c71cb2`, clean for the whole run;
+    command in the file): 3B + Whisper large-v3 `int8_float16` beam 5 + Indus Pocket TTS (CPU,
+    +0 MiB) **fits, 2,852 MiB headroom (upper bound: 1 Hz sampling)**, round trip completed.
+    7B: Whisper **out of memory** after vLLM left 1,049 MiB; `"fits": false`, `headroom: null`.
+    The earlier run at `4c1d4cc` matched every pre-inference reading; only the sampled peak
+    differed (5,430 vs 5,336 MiB). Checked: no home path or username in it.
   - **ADR-0003 drafted** (`docs/decisions/0003-llm-quantization-under-8gb.md`, status
     proposed): three options with measured vs unverified marked; Decision is `TODO(Cyril)`.
   - **NeMo dry-run** (not added to `uv.lock`, per Cyril): `nemo-toolkit` 3.0.0 resolves
@@ -31,10 +38,22 @@ then checked by Cyril. The next session starts by reading the top entry.
     AI4Bharat's NeMo fork or an ONNX build instead of stock NeMo.
   - **TTS:** Indus Pocket TTS works on CPU (`torch.cuda.is_initialized()` False); Whisper
     transcribed its Hindi output close to the prompt, so Piper fallback not needed.
-- **In progress (exact state):** uncommitted: ADR-0003 draft, `results/published/vram.json`,
-  this entry, the PLAN tick. They form the docs commit once Cyril approves.
-- **Next step (first command to run):** Cyril writes ADR-0003's Decision; then the docs
-  commit, `/review`, `/explain`, and Cyril pushes and opens the PR.
+- **In progress (exact state):** nothing uncommitted on `m0/gpu-smoke`. The M1 PLAN additions
+  and research notes are in `git stash` ("m1 plan+research"), for branch `m1/plan-research`
+  after this PR merges.
+- **Next step (first command to run):** second `/review` (new commits only); Cyril pushes and
+  opens the PR. After merge: `chore/precommit-gate` (F-002 guard), then `m1/plan-research`.
+- **Carry-forward from the first `/review` (not fixed in this PR, Cyril's call):**
+  - #4: `vram.py` doesn't wait for the GPU to go idle between runs, a child-process crash
+    still loses every run's numbers, and a hard crash can leave vLLM running. Fix: reuse
+    `min_util._wait_gpu_idle` and turn per-run exceptions in `main` into error records.
+  - Nits: `vllm_server.start` never closes the log file handle in the parent (one leaked fd per
+    probe); `find_min_util` doesn't check `lo < hi`; one bisection is noisy near the threshold
+    (repeat the chosen value once); `# noqa: ANN201` in `tests/test_min_util.py` suppresses a
+    rule that isn't enabled.
+  - `load_tts` puts the HF snapshot on `sys.path` and imports its `speak.py`: code from a model
+    repo runs in our process. Mitigated by the full-SHA pin and the read-before-use note;
+    logged in `docs/LIMITATIONS.md`.
 - **Open questions for Cyril:**
   - ADR-0003 Decision and "how we'd know we were wrong". M0.3's exit criterion ("or an ADR
     records the fallback") is only met once that's written.
@@ -66,11 +85,11 @@ then checked by Cyril. The next session starts by reading the top entry.
   **provisional**, revisit with M7 latency numbers; 3B first then 7B, each at its minimum;
   Indus Pocket TTS on CPU; re-download models into the default HF cache.
 - **Things that broke:** F-001 (vLLM couldn't find `Python.h`; logged and fixed in
-  `7a5bb24`). Not logged in FAILURES: torch 2.14 resolved to cu13 (fixed by the pin); uv and
+  `7a5bb24`). F-002 (G1 bypassed twice by Claude; fixed forward in `f6a5edf`, hook guard is a follow-up PR). Not logged in FAILURES: torch 2.14 resolved to cu13 (fixed by the pin); uv and
   Hugging Face downloads failing on the flaky network (fixed with one download at a time,
   long timeouts, `HF_HUB_DISABLE_XET=1` and retries); model weights lost when the folder
   they'd been moved to disappeared (re-downloaded).
-- **Gate status:** `make check` ✅ (ruff clean, pyright 0 errors, 44 passed); CI: not run
+- **Gate status:** `make check` ✅ (ruff clean, pyright 0 errors, 60 passed); CI: not run
   (not pushed); eval vs baseline: n/a
 
 ## 2026-11-24 — session 1, part 2 (M0.2)

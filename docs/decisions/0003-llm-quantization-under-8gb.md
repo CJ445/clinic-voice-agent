@@ -10,24 +10,28 @@ The LLM (vLLM), STT and TTS must run together on one RTX 4060 Laptop GPU (8,188 
 at least 500 MiB headroom (PLAN M0.3). vLLM must start first because it pre-allocates memory.
 TTS (Indus Pocket TTS) runs on CPU and measured +0 MiB, so the real contest is LLM vs STT.
 
-All numbers below come from `results/published/vram.json`: commit `4c1d4cc`, clean tree,
-`python -m bench.vram --beam-size 5 --llm Qwen/Qwen2.5-3B-Instruct-AWQ@3559b226e8:0.36
---llm Qwen/Qwen2.5-7B-Instruct-AWQ@b25037543e:0.80`. The utilizations are each model's minimum
+All numbers below come from `results/published/vram.json`: commit `1c71cb2`, clean tree; the
+exact command (full revision SHAs) is in the file. The utilizations are each model's minimum
 from `bench.min_util` (lowest value where vLLM starts with ≥ 1x concurrency at max-model-len
-4096; `results/min_util_*.json`, commit `0a764e5`). CUDA graphs on. STT is faster-whisper
-large-v3, `int8_float16`, beam 5 (provisional).
+4096; `results/published/min_util_*.json`, commit `0a764e5`, clean). CUDA graphs on. STT is
+faster-whisper large-v3, `int8_float16`, beam 5 (provisional).
+
+**Peaks are sampled at 1 Hz, so every headroom figure is an upper bound.** The same 3B set
+peaked at 5,430 MiB at `4c1d4cc` and 5,336 MiB at `1c71cb2` (every pre-inference reading was
+identical); the derivation below uses the larger.
 
 | | Qwen2.5-3B-Instruct-AWQ @ 0.36 | Qwen2.5-7B-Instruct-AWQ @ 0.80 |
 |---|---|---|
 | GPU MiB after vLLM | 3,653 | 7,139 |
 | Room left for STT | 4,535 | 1,049 |
 | Whisper large-v3 load | +1,599 | **out of memory** (`RuntimeError: CUDA failed with error out of memory`) |
-| Peak GPU MiB / headroom | 5,430 / **2,758 — fits** | 7,234 / — (no STT loaded) — **does not fit** |
-| Peak system RAM (of 15,274 MiB) | 8,118 | 7,424 (STT never loaded) |
+| Peak GPU MiB / headroom | 5,336 / **2,852 — fits** | 7,234 / `null` (no STT loaded) — **does not fit** |
+| Peak system RAM (of 15,274 MiB) | 8,955 | 8,600 (STT never loaded) |
 | Round trip | completed | not reached |
 | Licence | Qwen Research License — research/evaluation only, **non-commercial** | Apache-2.0 |
 
-vLLM's own log lines at those utilizations (`results/vllm_*_u0.36.log`, `_u0.80.log`):
+vLLM's own log lines at those utilizations (`results/vllm_*_u0.36.log`, `_u0.80.log`; these logs
+are **local only**, not committed, so the figures below can't be checked against a commit):
 
 | | 3B | 7B |
 |---|---|---|
@@ -49,14 +53,14 @@ Other forces:
 ### What the 7B is short by (derived from the numbers above, not measured)
 
 To fit, after-LLM MiB + STT load + inference peak + 500 must be ≤ 8,188. With the 3B's
-measured inference peak (5,430 − 5,252 = +178 MiB) as a stand-in: 7,139 + 1,599 + 178 + 500 =
+larger measured inference peak (5,430 − 5,252 = +178 MiB, at `4c1d4cc`) as a stand-in: 7,139 + 1,599 + 178 + 500 =
 9,416, so the 7B set is **≈ 1,230 MiB over**. The 7B's own inference peak is unverified.
 
 ## Options
 
 1. **7B on GPU, Whisper large-v3 on CPU (int8).**
-   - VRAM: STT moves off the GPU; the 7B alone peaked at 7,234 MiB, so 954 MiB headroom with
-     no STT on the GPU (measured, but without inference load from STT).
+   - VRAM: STT moves off the GPU; the 7B alone peaked at 7,234 MiB, leaving 954 MiB with
+     no STT on the GPU (derived from the record; not a headroom measurement of this option).
    - Latency: **unverified.** CPU large-v3 with beam 5 on the Ryzen 9 8945HS (16 threads) is
      likely far slower than GPU. It must be measured against the M7 latency budget before
      this can be accepted.
@@ -67,7 +71,7 @@ measured inference peak (5,430 − 5,252 = +178 MiB) as a stand-in: 7,139 + 1,59
      STT latency run.
 
 2. **A 3–4B LLM instead of the 7B (the Qwen 3B, or another model of that size).**
-   - VRAM: measured for the Qwen 3B: fits with 2,758 MiB headroom, leaving room for a larger
+   - VRAM: measured for the Qwen 3B: fits with 2,852 MiB headroom (upper bound), leaving room for a larger
      KV cache or a second STT pass.
    - Quality: the Qwen 3B's one Hindi sample was unusable (see Context). Other 3–4B instruct
      models with AWQ builds and Hindi ability are **unverified**: none has been tried here.
@@ -108,8 +112,9 @@ TODO(Cyril)
 
 ## Evidence
 
-- `results/published/vram.json` — commit `4c1d4cc`, both model sets, per-stage MiB, peak RAM.
-- `results/min_util_Qwen2.5-3B-Instruct-AWQ.json`, `results/min_util_Qwen2.5-7B-Instruct-AWQ.json`
-  — commit `0a764e5`, every trial (gitignored; local only).
+- `results/published/vram.json` — commit `1c71cb2`, both model sets, per-stage MiB, peak RAM.
+  The earlier run at `4c1d4cc` is in git history (`git show f5e252d:results/published/vram.json`).
+- `results/published/min_util_Qwen2.5-3B-Instruct-AWQ.json`, `results/published/min_util_Qwen2.5-7B-Instruct-AWQ.json`
+  — commit `0a764e5`, clean tree, every trial.
 - vLLM logs `results/vllm_Qwen2.5-*-AWQ_u*.log` (gitignored; local only).
 - Licences: model cards at the pinned revisions (`3559b226e8`, `b25037543e`), checked 2026-11-25.
