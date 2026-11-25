@@ -39,6 +39,7 @@ ErrorCode = Literal[
     "not_found",
     "already_cancelled",
     "unknown_tool",
+    "busy",
 ]
 
 
@@ -358,10 +359,13 @@ TOOLS: dict[str, tuple[type[Model], Any]] = {
 
 
 def run(conn: sqlite3.Connection, clock: Clock, name: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Call a tool with the LLM's raw JSON arguments; always return a JSON-ready dict.
+    """Call a tool with the LLM's raw JSON arguments and return a JSON-ready dict.
 
     Bad arguments become ToolError(invalid_input) naming the field, so the agent can ask the
-    caller again instead of crashing the turn.
+    caller again instead of crashing the turn. DB contention (another line holding the write lock
+    past the busy timeout) becomes ToolError(busy), and a DB constraint firing mid-write becomes
+    the matching slot error. Programming errors (e.g. calling inside an open transaction) still
+    raise: they are bugs in our code, not caller input.
     """
     if name not in TOOLS:
         known = ", ".join(TOOLS)
@@ -377,7 +381,25 @@ def run(conn: sqlite3.Connection, clock: Clock, name: str, args: dict[str, Any])
             for err in exc.errors()
         )
         return ToolError(code="invalid_input", message=problems).model_dump(mode="json")
-    return tool(conn, clock, req).model_dump(mode="json")
+    try:
+        result = tool(conn, clock, req)
+    except sqlite3.OperationalError as exc:
+        if "locked" not in str(exc) and "busy" not in str(exc):
+            raise
+        result = ToolError(code="busy", message="the booking system is busy; try again shortly")
+    except sqlite3.IntegrityError as exc:
+        result = _constraint_error(exc)
+    return result.model_dump(mode="json")
+
+
+def _constraint_error(exc: sqlite3.IntegrityError) -> ToolError:
+    """Map a DB safety-net constraint to the typed error book()/cancel() would have returned."""
+    text = str(exc)
+    if "slot is blocked" in text:
+        return ToolError(code="slot_blocked", message="the doctor is unavailable for that slot")
+    if "appointments.slot_id" in text:
+        return ToolError(code="slot_taken", message="that slot is already booked")
+    raise exc
 
 
 def tool_schemas() -> dict[str, dict[str, Any]]:

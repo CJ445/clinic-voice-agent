@@ -70,9 +70,12 @@ BEGIN SELECT RAISE(ABORT, 'slot has an active appointment'); END;
 """
 
 
-def connect(path: Path | str) -> sqlite3.Connection:
-    """Open the clinic DB with foreign keys on (SQLite leaves them off by default)."""
-    conn = sqlite3.connect(path, timeout=5)
+def connect(path: Path | str, timeout: float = 5) -> sqlite3.Connection:
+    """Open the clinic DB with foreign keys on (SQLite leaves them off by default).
+
+    timeout: seconds to wait for another connection's write lock before "database is locked".
+    """
+    conn = sqlite3.connect(path, timeout=timeout)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
