@@ -57,6 +57,52 @@ AMBIGUOUS_RELATIVE = [
 ]
 
 
+FRI = datetime(2026, 12, 4, 10, 0, tzinfo=IST)
+SAT = datetime(2026, 12, 5, 10, 0, tzinfo=IST)
+
+WEEKDAYS = [
+    ("this Friday", MON, "2026-12-04"),
+    ("is shukravar", MON, "2026-12-04"),
+    ("इस शुक्रवार शाम", MON, "2026-12-04 evening"),
+    ("Friday", MON, "2026-12-04"),
+    ("fri morning", MON, "2026-12-04 morning"),
+    ("shukravar ko subah", MON, "2026-12-04 morning"),
+    ("mangalwar", MON, "2026-12-01"),
+    ("budhvar dopahar", MON, "2026-12-02 afternoon"),
+    ("guruvar", MON, "2026-12-03"),
+    ("brihaspativar", MON, "2026-12-03"),
+    ("गुरुवार", MON, "2026-12-03"),
+    ("shaniwar", MON, "2026-12-05"),
+    ("itwar", MON, "2026-12-06"),
+    ("रविवार", MON, "2026-12-06"),
+    ("this Monday", MON, "2026-11-30"),  # "this" + today's weekday = today
+    ("next Monday", MON, "2026-12-07"),  # today's weekday: only next week's reading
+    ("agle somvar", MON, "2026-12-07"),
+    ("next Monday", SAT, "2026-12-07"),  # Monday has passed this week: one reading
+    ("next Friday", FRI, "2026-12-11"),
+    ("agle budhvar", FRI, "2026-12-09"),
+    ("kal mangalvar", MON, "2026-12-01"),  # two day words, same day: fine
+    ("next Friday", MON, "ambiguous: this week's"),  # Cyril: in-week "next" -> ask
+    ("agle shukravar", MON, "ambiguous: this week's"),
+    ("अगले शुक्रवार", MON, "ambiguous: this week's"),
+    ("next Saturday", FRI, "ambiguous: this week's"),
+    ("Monday", MON, "ambiguous: today"),  # bare weekday said on that weekday
+    ("kal friday", MON, "ambiguous: more than one day"),
+    ("agle hafte", MON, "ambiguous: no day"),  # "next week" names no day
+]
+
+
+@pytest.mark.parametrize(("text", "now", "expected"), WEEKDAYS)
+def test_weekdays(text: str, now: datetime, expected: str) -> None:
+    check(text, expected, now)
+
+
+def test_in_week_next_offers_both_readings() -> None:
+    result = resolve("next Friday", MON)
+    assert isinstance(result, Ambiguous)
+    assert [d.isoformat() for d in result.candidates] == ["2026-12-04", "2026-12-11"]
+
+
 def check(text: str, expected: str, now: datetime = MON) -> None:
     got = show(resolve(text, now))
     if expected.startswith("ambiguous: "):

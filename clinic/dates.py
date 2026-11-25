@@ -10,7 +10,10 @@ table test and the same input always gives the same date. When the words are unc
 guess: it returns Ambiguous with a reason, and the agent asks the caller. The LLM's job is only
 to pass the caller's words here and say the answer back.
 
-Ambiguity rules (Cyril, M2.4): a bare kal/कल is tomorrow (a booking call is future context);
+Ambiguity rules (Cyril, M2.4): "next Friday" said in a week that still has a Friday is
+ambiguous (this week's or next week's?); once the weekday has passed, or on that weekday, it has
+one reading. A bare weekday is the coming one; said on that same weekday, it is ambiguous.
+A bare kal/कल is tomorrow (a booking call is future context);
 kal with a past-tense marker (tha, gaya, था...) is ambiguous; कर, a common STT error for कल, is
 ambiguous unless another day word is present (then it is just "do", as in "book kar do").
 """
@@ -52,6 +55,22 @@ PARTS: dict[PartOfDay, set[str]] = {
     "afternoon": {"dopahar", "dopehar", "afternoon", "दोपहर"},
     "evening": {"shaam", "sham", "evening", "शाम"},
 }
+# Monday = 0, as date.weekday(). Romanised spellings as callers and STT write them.
+WEEKDAYS: dict[str, int] = {}
+for number, names in enumerate(
+    [
+        "monday mon somvar somwar सोमवार",
+        "tuesday tue tues mangalvar mangalwar मंगलवार",
+        "wednesday wed budhvar budhwar बुधवार",
+        "thursday thu thur thurs guruvar guruwar brihaspativar veervar गुरुवार बृहस्पतिवार",
+        "friday fri shukravar shukrawar शुक्रवार",
+        "saturday sat shanivar shaniwar शनिवार",
+        "sunday sun ravivar raviwar itvaar itwar रविवार इतवार",
+    ]
+):
+    WEEKDAYS.update(dict.fromkeys(names.split(), number))
+NEXT = {"next", "agle", "agla", "agli", "अगले", "अगला", "अगली"}
+THIS = {"this", "is", "iss", "coming", "इस"}
 WORD = re.compile(r"[0-9a-zऀ-ॿ]+")  # Latin, digits, and the whole Devanagari block
 
 
@@ -75,8 +94,13 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
     part = parts[0] if parts else None
 
     days: list[date] = []  # one entry per day expression the caller used
-    for word in said:
-        if word in TODAY:
+    for i, word in enumerate(said):
+        if word in WEEKDAYS:
+            day = weekday(WEEKDAYS[word], said[i - 1] if i else "", today)
+            if isinstance(day, Ambiguous):
+                return day
+            days.append(day)
+        elif word in TODAY:
             days.append(today)
         elif word in TOMORROW:
             days.append(today + timedelta(days=1))
@@ -99,3 +123,23 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
     if len(distinct) > 1:
         return Ambiguous("more than one day mentioned; ask which one", tuple(distinct))
     return Resolved(distinct[0], distinct[0], part)
+
+
+def weekday(number: int, before: str, today: date) -> date | Ambiguous:
+    """The date a weekday name means, given the word before it (next/agle, this/is, or none)."""
+    ahead = (number - today.weekday()) % 7  # 0 when it is that weekday today
+    if before in THIS:
+        return today + timedelta(days=ahead)
+    coming = today + timedelta(days=ahead or 7)
+    if before in NEXT:
+        if number > today.weekday():  # that weekday is still ahead this week
+            later = coming + timedelta(days=7)
+            return Ambiguous(
+                "'next' can mean this week's or next week's; ask which", (coming, later)
+            )
+        return coming
+    if ahead == 0:
+        return Ambiguous(
+            "that weekday is today; ask if they mean today or next week", (today, coming)
+        )
+    return coming
