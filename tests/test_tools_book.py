@@ -167,3 +167,14 @@ def test_blank_name_is_rejected(name: str) -> None:
 def test_bare_plus_is_rejected(phone: str) -> None:
     with pytest.raises(ValidationError):
         req(phone=phone)
+
+
+@pytest.mark.xfail(strict=True, reason="M3.2: key from orchestrator")
+def test_same_key_from_two_different_callers_does_not_conflict(
+    conn: sqlite3.Connection, clock: FrozenClock
+) -> None:
+    # Review #3 (Cyril: defer to M3.2). Today the LLM invents the key and keys are global, so two
+    # callers whose LLM both emits "1" collide. M3.2 has the orchestrator supply session+turn ids.
+    first = book(conn, clock, req(key="1", phone="9876543210"))
+    second = book(conn, clock, req(slot_id="d1-20261130-1000", key="1", phone="9123456789"))
+    assert isinstance(first, BookOut) and isinstance(second, BookOut)
