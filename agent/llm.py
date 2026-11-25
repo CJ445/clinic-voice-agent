@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import httpx2
-from openai import APIConnectionError, APIStatusError, AsyncOpenAI, omit
+from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI, omit
 from openai.lib.streaming.chat import ChatCompletionStreamState
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolUnionParam
 
@@ -154,6 +154,8 @@ async def _attempt(
                 raise _Failed(reason, "no chunk in time", got_token=got_token) from None
             except APIConnectionError as exc:
                 raise _Failed("dropped", str(exc), got_token=got_token) from exc
+            except APIError as exc:  # vLLM's mid-stream SSE error event (after the subclass above)
+                raise _Failed("http_error", str(exc), got_token=got_token) from exc
             now = time.perf_counter_ns()
             if first_chunk_ns is None:
                 first_chunk_ns = now

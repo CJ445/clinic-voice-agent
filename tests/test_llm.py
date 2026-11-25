@@ -173,6 +173,24 @@ def test_drop_before_any_token_is_retried() -> None:
     assert (reply.reason, reply.attempts, len(server.requests)) == ("dropped", 2, 2)
 
 
+# vLLM 0.19.1 reports a server-side failure mid-stream as an SSE error event (review #2).
+ERROR_EVENT = 'data: {"error": {"message": "engine dead", "type": "InternalServerError"}}\n\n'
+
+
+def test_error_event_before_any_token_is_retried() -> None:
+    server = FakeServer([ROLE, ERROR_EVENT], [ROLE, ERROR_EVENT])
+    reply = ask(server)
+    assert isinstance(reply, llm.LLMUnavailable)
+    assert (reply.reason, reply.attempts, len(server.requests)) == ("http_error", 2, 2)
+
+
+def test_error_event_after_a_token_is_not_retried() -> None:
+    server = FakeServer([*TEXT[:2], ERROR_EVENT], TEXT)
+    reply = ask(server)
+    assert isinstance(reply, llm.LLMUnavailable)
+    assert (reply.reason, reply.attempts, len(server.requests)) == ("http_error", 1, 1)
+
+
 def test_stream_that_ends_without_finishing_is_dropped() -> None:
     reply = ask(FakeServer(TEXT[:2]))  # a token, then EOF with no finish_reason and no [DONE]
     assert isinstance(reply, llm.LLMUnavailable) and reply.reason == "dropped"
