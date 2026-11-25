@@ -10,15 +10,20 @@ table test and the same input always gives the same date. When the words are unc
 guess: it returns Ambiguous with a reason, and the agent asks the caller. The LLM's job is only
 to pass the caller's words here and say the answer back.
 
-Ambiguity rules (Cyril, M2.4): "next Friday" said in a week that still has a Friday is
-ambiguous (this week's or next week's?); once the weekday has passed, or on that weekday, it has
-one reading. A bare weekday is the coming one; said on that same weekday, it is ambiguous.
-"the 5th" / "5 tarikh" is the next 5th on or after today; if that month has no such day (the
-31st in November), it is ambiguous. A bare number is not a date: "5 baje" is a time.
-A bare kal/कल is tomorrow (a booking call is future context);
-any past-tense marker (tha, gaya, था...) makes the sentence ambiguous, as do last/pichhle,
-no/nahi, raat (night) and month words (not parsed yet); कर, a common STT error for कल, is
-ambiguous unless another day word is present (then it is just "do", as in "book kar do").
+Rules (Cyril's rulings in M2.4 are marked *):
+- kal/कल/tomorrow is the next calendar day*, aaj is today, parso is the day after tomorrow.
+  From 00:00 to 04:00 IST, aaj/kal/tomorrow are ambiguous*: at 00:30 "kal subah" probably means
+  the coming morning. (parso keeps the calendar rule; not covered by the ruling.)
+- A weekday is the coming one; said on that weekday, it is ambiguous. "this/is X" is the coming X.
+  "next X" is ambiguous while this week (Monday start) still has an X*, and always on a Sunday*.
+  "agle hafte X" / "next week X" is X in the following week*.
+- "the 5th" / "5 tarikh" is the next 5th on or after today*; a month without that day is
+  ambiguous. An ordinal counts only in a date position ("2nd appointment" is not a date), and a
+  bare number never does ("5 baje" is a time).
+- Always ambiguous: a past-tense marker (tha, gaya, था...), last/pichhle, no/nahi, raat (night),
+  any month word (not parsed yet), two different days, two parts of the day, no day at all.
+- कर, a common STT error for कल, is ambiguous unless another day word is present (then it is
+  just "do", as in "book kar do").
 """
 
 import re
@@ -51,6 +56,7 @@ AmbiguousCode = Literal[
     "negated",  # kal nahi: a day the caller just turned down
     "night",  # raat: "kal raat" is often last night, and the clinic is shut
     "month_named",  # a month word: not parsed yet, so never guess the month
+    "after_midnight",  # aaj/kal between 00:00 and 04:00 IST: which day does the caller mean?
 ]
 
 
@@ -89,6 +95,7 @@ PAST_MARKERS = {
     "हुआ",
     "हुई",
 }  # romanised "the" (they were) is left out: it collides with English "the"
+SMALL_HOURS_END = 4  # IST hour; before it, aaj/kal/tomorrow are ambiguous
 LAST = {"last", "pichhle", "pichla", "pichli", "पिछले", "पिछला", "पिछली"}  # before a weekday
 NEGATION = {"nahi", "nahin", "nai", "not", "no", "नहीं", "नही"}  # not "na": a common filler
 NIGHT = {"raat", "rat", "night", "tonight", "रात"}
@@ -204,6 +211,7 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     today = now.astimezone(IST).date()
+    small_hours = now.astimezone(IST).hour < SMALL_HOURS_END
     said = words(text)
     if NEGATION.intersection(said):
         return Ambiguous("negated", "the caller said no/nahi; ask which day they do want")
@@ -230,10 +238,15 @@ def resolve(text: str, now: datetime) -> Resolved | Ambiguous:
             if isinstance(day, Ambiguous):
                 return day
             days.append(day)
-        elif word in TODAY:
-            days.append(today)
-        elif word in TOMORROW or word in KAL:
-            days.append(today + timedelta(days=1))
+        elif word in TODAY or word in TOMORROW or word in KAL:
+            if small_hours:  # Cyril: at 00:30, "kal subah" probably means this coming morning
+                tomorrow = today + timedelta(days=1)
+                return Ambiguous(
+                    "after_midnight",
+                    "it is just after midnight; confirm the date",
+                    (today,) if word in TODAY else (today, tomorrow),
+                )
+            days.append(today if word in TODAY else today + timedelta(days=1))
         elif word in DAY_AFTER:
             days.append(today + timedelta(days=2))
         elif word in YESTERDAY:

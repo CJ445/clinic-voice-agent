@@ -201,10 +201,39 @@ def test_weeks_and_positions(text: str, now: datetime, expected: str) -> None:
     check(text, expected, now)
 
 
+AT_0030 = datetime(2026, 12, 1, 0, 30, tzinfo=IST)
+AT_0359 = datetime(2026, 12, 1, 3, 59, tzinfo=IST)
+AT_0400 = datetime(2026, 12, 1, 4, 0, tzinfo=IST)
+
+# Review #8 (Cyril): from 00:00 to 04:00 IST, aaj/kal/tomorrow are ambiguous: at 00:30, "kal
+# subah" probably means the morning a few hours away, not the calendar day after.
+AFTER_MIDNIGHT = [
+    ("kal subah", AT_0030, "ambiguous: after_midnight"),
+    ("कल", AT_0030, "ambiguous: after_midnight"),
+    ("tomorrow", AT_0359, "ambiguous: after_midnight"),
+    ("aaj shaam", AT_0030, "ambiguous: after_midnight"),
+    ("kal subah", AT_0400, "2026-12-02 morning"),
+    ("aaj shaam", AT_0400, "2026-12-01 evening"),
+    ("parso", AT_0030, "2026-12-03"),  # not in the ruling: calendar rule (logged for Cyril)
+    ("Friday", AT_0030, "2026-12-04"),
+]
+
+
+@pytest.mark.parametrize(("text", "now", "expected"), AFTER_MIDNIGHT)
+def test_after_midnight(text: str, now: datetime, expected: str) -> None:
+    check(text, expected, now)
+
+
+def test_after_midnight_kal_offers_both_days() -> None:
+    result = resolve("kal subah", AT_0030)
+    assert isinstance(result, Ambiguous)
+    assert [d.isoformat() for d in result.candidates] == ["2026-12-01", "2026-12-02"]
+
+
 def test_the_table_has_at_least_40_cases() -> None:
     # PLAN M2.4 exit: >= 40 table cases incl. Hinglish and ambiguous ones.
     table = RELATIVE_DAYS + AMBIGUOUS_RELATIVE + WEEKDAYS + DAYS_OF_MONTH
-    table += NOT_A_PLAIN_DAY + WEEKS_AND_POSITIONS
+    table += NOT_A_PLAIN_DAY + WEEKS_AND_POSITIONS + AFTER_MIDNIGHT
     ambiguous = [row for row in table if row[-1].startswith("ambiguous")]
     assert len(table) >= 40 and len(ambiguous) >= 10
 
@@ -219,8 +248,9 @@ def test_relative_days(text: str, expected: str) -> None:
 
 
 def test_now_is_read_in_ist() -> None:
-    # 19:00 UTC on 30 Nov is 00:30 IST on 1 Dec, so "aaj" is 1 Dec.
-    late = datetime(2026, 11, 30, 19, 0, tzinfo=UTC)
+    # 23:00 UTC on 30 Nov is 04:30 IST on 1 Dec, so "aaj" is 1 Dec. (Before 04:00 IST aaj/kal
+    # are ambiguous; see test_after_midnight.)
+    late = datetime(2026, 11, 30, 23, 0, tzinfo=UTC)
     assert show(resolve("aaj", late)) == "2026-12-01"
     assert show(resolve("kal", late)) == "2026-12-02"
 
