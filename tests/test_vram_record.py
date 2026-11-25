@@ -5,7 +5,8 @@ fail closed: any sampler error fails the run, an unmeasured peak is None (never 
 that were never reached are None. Error messages must not carry the home directory.
 """
 
-import time
+import threading
+from collections.abc import Callable
 
 from bench.vram import Peaks, combine_errors, describe_error, summarize
 
@@ -13,40 +14,49 @@ TOTAL = 8188
 FULL = {"baseline": 11, "after_llm": 3653, "after_stt": 5252, "after_tts": 5252}
 
 
-def test_sampler_failure_on_first_sample_leaves_peak_unmeasured() -> None:
-    def read() -> tuple[int, int]:
-        raise RuntimeError("nvidia-smi: Unknown Error")
+def scripted_read(values: list[tuple[int, int] | Exception]) -> tuple[Callable, threading.Event]:
+    """Fake sampler read: returns or raises values in order; sets `done` on the last one.
 
-    with Peaks(read, interval_s=0.01) as peaks:
-        time.sleep(0.05)
+    The tests wait on `done` instead of sleeping, so they don't depend on thread scheduling
+    (second review #3). After the last value it keeps returning it.
+    """
+    done = threading.Event()
+    calls = 0
+
+    def read() -> tuple[int, int]:
+        nonlocal calls
+        value = values[min(calls, len(values) - 1)]
+        calls += 1
+        if calls >= len(values):
+            done.set()
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    return read, done
+
+
+def test_sampler_failure_on_first_sample_leaves_peak_unmeasured() -> None:
+    read, done = scripted_read([RuntimeError("nvidia-smi: Unknown Error")])
+    with Peaks(read, interval_s=0.001) as peaks:
+        assert done.wait(timeout=5)
     assert peaks.gpu is None
     assert peaks.ram is None
     assert peaks.error is not None and "Unknown Error" in peaks.error
 
 
 def test_sampler_failure_after_good_samples_is_still_an_error() -> None:
-    calls = iter([(5000, 8000), (5400, 8100)])
-
-    def read() -> tuple[int, int]:
-        return next(calls)  # StopIteration on the third call stands in for a failed sample
-
-    with Peaks(read, interval_s=0.01) as peaks:
-        time.sleep(0.1)
+    read, done = scripted_read([(5000, 8000), (5400, 8100), RuntimeError("failed sample")])
+    with Peaks(read, interval_s=0.001) as peaks:
+        assert done.wait(timeout=5)
     assert peaks.gpu == 5400
-    assert peaks.error is not None
+    assert peaks.error is not None and "failed sample" in peaks.error
 
 
 def test_sampler_keeps_the_maximum() -> None:
-    values = iter([(5000, 8000), (5430, 7000), (5100, 8118)])
-
-    def read() -> tuple[int, int]:
-        try:
-            return next(values)
-        except StopIteration:
-            return (5100, 8118)
-
-    with Peaks(read, interval_s=0.01) as peaks:
-        time.sleep(0.1)
+    read, done = scripted_read([(5000, 8000), (5430, 7000), (5100, 8118)])
+    with Peaks(read, interval_s=0.001) as peaks:
+        assert done.wait(timeout=5)
     assert (peaks.gpu, peaks.ram, peaks.error) == (5430, 8118, None)
 
 
