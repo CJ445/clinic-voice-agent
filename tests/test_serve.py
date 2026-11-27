@@ -217,6 +217,32 @@ def test_a_record_without_argv_falls_back(tmp_path: Path) -> None:
     assert serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path) is None
 
 
+@pytest.mark.parametrize(
+    "drop",
+    [
+        ("dirty",),
+        ("commit",),
+        ("runs",),
+        ("runs", 0, "mib"),
+        ("runs", 0, "fits"),
+        ("runs", 0, "llm"),
+    ],
+)
+def test_an_older_shaped_record_falls_back_instead_of_crashing(
+    tmp_path: Path, drop: tuple[str | int, ...]
+) -> None:
+    # Review should-fix #1: a print-only feature must never stop `make serve` from starting.
+    path = write_vram(tmp_path)
+    record = json.loads(path.read_text())
+    parent = record
+    for key in drop[:-1]:
+        parent = parent[key]
+    del parent[drop[-1]]
+    path.write_text(json.dumps(record))
+    # A record without its commit has no provenance, so it isn't trusted either.
+    assert serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path) is None
+
+
 def test_two_matches_use_the_lower_headroom(tmp_path: Path) -> None:
     write_vram(tmp_path, "a", headroom=550)
     low = write_vram(tmp_path, "b", headroom=520, commit="abc1234")

@@ -76,7 +76,7 @@ def _in_range(chosen: ServedUtil) -> ServedUtil:
 
 @dataclass(frozen=True)
 class Measured:
-    """A make vram headroom for exactly the configuration being served."""
+    """Headroom measured by make vram for exactly the configuration being served."""
 
     headroom_mib: int
     source: str  # the record's path
@@ -88,17 +88,20 @@ def measured_headroom(repo: str, revision: str, util: float, *, records: Path) -
 
     A run matches only if its record is from a clean tree, the set fitted, and its llm.argv is
     exactly the command agent.serve launches (same full SHA, utilization and tool-calling flags).
-    Records without llm.argv (before 27d99b6) never match. Several matches: the lowest headroom.
+    Records without llm.argv (before 27d99b6), a commit or a dirty flag never match; nor does
+    results/published/vram.json (the glob needs vram_*). Several matches: the lowest headroom.
     """
     served = vllm_server.server_command(repo, revision, util, tools=True)[1:]
     found = []
     for path in sorted(records.glob("vram_*.json")):
         record = json.loads(path.read_text())
-        if record["dirty"] is not False:
+        # .get throughout: an older-shaped record falls back, it never stops serving (review #1).
+        if record.get("dirty") is not False or not record.get("commit"):
             continue
-        for run in record["runs"]:
-            headroom = run["mib"]["headroom"]
-            if run["fits"] and headroom is not None and run["llm"].get("argv") == served:
+        for run in record.get("runs", []):
+            headroom = run.get("mib", {}).get("headroom")
+            argv = run.get("llm", {}).get("argv")
+            if run.get("fits") is True and headroom is not None and argv == served:
                 found.append(Measured(headroom, str(path), record["commit"]))
     return min(found, key=lambda m: m.headroom_mib, default=None)
 
