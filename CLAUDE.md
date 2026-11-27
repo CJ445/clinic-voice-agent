@@ -66,6 +66,9 @@ make gate         # compare latest eval vs ci/baseline.json; non-zero exit on re
    never rewrite history, never `--no-verify`.
 10. **When stuck after two attempts**, stop, write what you tried in `docs/FAILURES.md`
     (draft entry), and ask.
+11. **Mutation checks must not leave stale bytecode.** Run them with
+    `PYTHONDONTWRITEBYTECODE=1`, and after restoring the file delete its cached `.pyc`
+    (`find <pkg> -name '*.pyc' -delete`), so restored source is what runs (F-003).
 
 ## Commit format
 
