@@ -161,6 +161,13 @@ def test_published_served_record_is_what_serve_would_use() -> None:
 # --- measured headroom (Cyril, 2026-11-27): only on an exact match, else "computed" -------------
 
 
+GPU = serve.Gpu("NVIDIA GeForce RTX 4060 Laptop GPU", 8188)
+
+
+def lookup(records: Path, gpu: serve.Gpu = GPU) -> serve.Measured | None:
+    return serve.measured_headroom(REPO, FULL, 0.61, records=records, gpu=gpu)
+
+
 def write_vram(
     folder: Path,
     name: str = "served",
@@ -173,6 +180,8 @@ def write_vram(
     headroom: int | None = 550,
     fits: bool = True,
     commit: str = "27d99b6",
+    gpu: str = GPU.name,
+    total: int = GPU.total_mib,
 ) -> Path:
     from agent import vllm_server
 
@@ -180,15 +189,14 @@ def write_vram(
     llm_run = {"repo": repo, "revision": revision, "gpu_memory_utilization": util, "argv": argv}
     run = {"llm": llm_run, "mib": {"headroom": headroom}, "fits": fits}
     path = folder / f"vram_{name}.json"
-    path.write_text(json.dumps({"commit": commit, "dirty": dirty, "runs": [run]}))
+    record = {"commit": commit, "dirty": dirty, "gpu": gpu, "total_mib": total, "runs": [run]}
+    path.write_text(json.dumps(record))
     return path
 
 
 def test_exact_match_gives_the_measured_headroom(tmp_path: Path) -> None:
     path = write_vram(tmp_path)
-    assert serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path) == serve.Measured(
-        550, str(path), "27d99b6"
-    )
+    assert lookup(tmp_path) == serve.Measured(550, str(path), "27d99b6")
 
 
 @pytest.mark.parametrize(
@@ -201,11 +209,13 @@ def test_exact_match_gives_the_measured_headroom(tmp_path: Path) -> None:
         {"dirty": True},  # measured on a dirty tree
         {"headroom": None, "fits": False},  # a stage failed, so there is no headroom
         {"headroom": 300, "fits": False},  # measured, but under the 500 MiB floor
+        {"gpu": "NVIDIA GeForce RTX 4070 Laptop GPU"},  # measured on another GPU
+        {"total": 12282},  # same name, different memory size
     ],
 )
 def test_any_mismatch_falls_back_to_computed(tmp_path: Path, mismatch: dict[str, object]) -> None:
     write_vram(tmp_path, **mismatch)  # type: ignore[arg-type]
-    assert serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path) is None
+    assert lookup(tmp_path) is None
 
 
 def test_a_record_without_argv_falls_back(tmp_path: Path) -> None:
@@ -214,7 +224,7 @@ def test_a_record_without_argv_falls_back(tmp_path: Path) -> None:
     record = json.loads(path.read_text())
     del record["runs"][0]["llm"]["argv"]
     path.write_text(json.dumps(record))
-    assert serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path) is None
+    assert lookup(tmp_path) is None
 
 
 @pytest.mark.parametrize(
@@ -222,6 +232,8 @@ def test_a_record_without_argv_falls_back(tmp_path: Path) -> None:
     [
         ("dirty",),
         ("commit",),
+        ("gpu",),
+        ("total_mib",),
         ("runs",),
         ("runs", 0, "mib"),
         ("runs", 0, "fits"),
@@ -240,13 +252,13 @@ def test_an_older_shaped_record_falls_back_instead_of_crashing(
     del parent[drop[-1]]
     path.write_text(json.dumps(record))
     # A record without its commit has no provenance, so it isn't trusted either.
-    assert serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path) is None
+    assert lookup(tmp_path) is None
 
 
 def test_two_matches_use_the_lower_headroom(tmp_path: Path) -> None:
     write_vram(tmp_path, "a", headroom=550)
     low = write_vram(tmp_path, "b", headroom=520, commit="abc1234")
-    found = serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path)
+    found = lookup(tmp_path)
     assert found == serve.Measured(520, str(low), "abc1234")
 
 
@@ -259,6 +271,9 @@ def test_budget_prints_measured_headroom_when_given() -> None:
 
 def test_published_served_record_matches_what_serve_runs() -> None:
     chosen = serve.choose_util(REPO, FULL, override=None, records=serve.RECORDS)
-    found = serve.measured_headroom(REPO, FULL, chosen.util, records=serve.RECORDS)
+    path = serve.RECORDS / "vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json"
+    record = json.loads(path.read_text())
+    gpu = serve.Gpu(record["gpu"], record["total_mib"])  # CI has no GPU: take the record's own
+    found = serve.measured_headroom(REPO, FULL, chosen.util, records=serve.RECORDS, gpu=gpu)
     assert found is not None
     assert found.source == "results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json"

@@ -75,6 +75,14 @@ def _in_range(chosen: ServedUtil) -> ServedUtil:
 
 
 @dataclass(frozen=True)
+class Gpu:
+    """The GPU agent.serve is about to run on, as nvidia-smi names it."""
+
+    name: str
+    total_mib: int
+
+
+@dataclass(frozen=True)
 class Measured:
     """Headroom measured by make vram for exactly the configuration being served."""
 
@@ -83,11 +91,14 @@ class Measured:
     commit: str
 
 
-def measured_headroom(repo: str, revision: str, util: float, *, records: Path) -> Measured | None:
+def measured_headroom(
+    repo: str, revision: str, util: float, *, records: Path, gpu: Gpu
+) -> Measured | None:
     """The measured headroom for this exact served setup, or None (Cyril, 2026-11-27).
 
     A run matches only if its record is from a clean tree, the set fitted, and its llm.argv is
-    exactly the command agent.serve launches (same full SHA, utilization and tool-calling flags).
+    exactly the command agent.serve launches (same full SHA, utilization and tool-calling flags),
+    on a GPU with the same name and total memory.
     Records without llm.argv (before 27d99b6), a commit or a dirty flag never match; nor does
     results/published/vram.json (the glob needs vram_*). Several matches: the lowest headroom.
     """
@@ -98,6 +109,8 @@ def measured_headroom(repo: str, revision: str, util: float, *, records: Path) -
         # .get throughout: an older-shaped record falls back, it never stops serving (review #1).
         if record.get("dirty") is not False or not record.get("commit"):
             continue
+        if (record.get("gpu"), record.get("total_mib")) != (gpu.name, gpu.total_mib):
+            continue  # measured on another GPU (Cyril, 2026-11-27)
         for run in record.get("runs", []):
             headroom = run.get("mib", {}).get("headroom")
             argv = run.get("llm", {}).get("argv")
@@ -128,10 +141,12 @@ def budget(chosen: ServedUtil, *, total_mib: int, measured: Measured | None = No
     )
 
 
-def total_mib() -> int:
-    """Total VRAM of GPU 0, from nvidia-smi."""
-    query = ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"]
-    return int(subprocess.run(query, check=True, capture_output=True, text=True).stdout.split()[0])
+def gpu_info() -> Gpu:
+    """Name and total VRAM of GPU 0, from nvidia-smi."""
+    query = ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]
+    first = subprocess.run(query, check=True, capture_output=True, text=True).stdout.splitlines()[0]
+    name, total = first.rsplit(",", 1)
+    return Gpu(name.strip(), int(total))
 
 
 def _sigterm_as_interrupt(signum: int, frame: FrameType | None) -> None:
@@ -156,8 +171,9 @@ def main() -> None:
     args = parser.parse_args()
     repo, _, revision = args.llm.partition("@")
     chosen = choose_util(repo, revision, override=args.util, records=RECORDS)
-    measured = measured_headroom(repo, revision, chosen.util, records=RECORDS)
-    print(budget(chosen, total_mib=total_mib(), measured=measured), flush=True)
+    gpu = gpu_info()
+    measured = measured_headroom(repo, revision, chosen.util, records=RECORDS, gpu=gpu)
+    print(budget(chosen, total_mib=gpu.total_mib, measured=measured), flush=True)
     proc = vllm_server.start(repo, revision, chosen.util, LOG, tools=True)
     signal.signal(signal.SIGTERM, _sigterm_as_interrupt)
     try:
