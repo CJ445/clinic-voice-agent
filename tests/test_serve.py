@@ -164,8 +164,10 @@ def test_published_served_record_is_what_serve_would_use() -> None:
 GPU = serve.Gpu("NVIDIA GeForce RTX 4060 Laptop GPU", 8188)
 
 
-def lookup(records: Path, gpu: serve.Gpu = GPU) -> serve.Measured | None:
-    return serve.measured_headroom(REPO, FULL, 0.61, records=records, gpu=gpu)
+def lookup(
+    records: Path, gpu: serve.Gpu = GPU, vllm: str | None = "0.19.1"
+) -> serve.Measured | None:
+    return serve.measured_headroom(REPO, FULL, 0.61, records=records, gpu=gpu, vllm_version=vllm)
 
 
 def write_vram(
@@ -182,6 +184,7 @@ def write_vram(
     commit: str = "27d99b6",
     gpu: str = GPU.name,
     total: int = GPU.total_mib,
+    vllm: str | None = None,
 ) -> Path:
     from agent import vllm_server
 
@@ -190,13 +193,15 @@ def write_vram(
     run = {"llm": llm_run, "mib": {"headroom": headroom}, "fits": fits}
     path = folder / f"vram_{name}.json"
     record = {"commit": commit, "dirty": dirty, "gpu": gpu, "total_mib": total, "runs": [run]}
+    if vllm is not None:
+        record["vllm_version"] = vllm
     path.write_text(json.dumps(record))
     return path
 
 
 def test_exact_match_gives_the_measured_headroom(tmp_path: Path) -> None:
     path = write_vram(tmp_path)
-    assert lookup(tmp_path) == serve.Measured(550, str(path), "27d99b6")
+    assert lookup(tmp_path) == serve.Measured(550, str(path), "27d99b6", vllm_checked=False)
 
 
 @pytest.mark.parametrize(
@@ -259,14 +264,35 @@ def test_two_matches_use_the_lower_headroom(tmp_path: Path) -> None:
     write_vram(tmp_path, "a", headroom=550)
     low = write_vram(tmp_path, "b", headroom=520, commit="abc1234")
     found = lookup(tmp_path)
-    assert found == serve.Measured(520, str(low), "abc1234")
+    assert found == serve.Measured(520, str(low), "abc1234", vllm_checked=False)
 
 
 def test_budget_prints_measured_headroom_when_given() -> None:
     chosen = serve.ServedUtil(0.61, 0.59, "x.json", False)
-    text = serve.budget(chosen, total_mib=8188, measured=serve.Measured(550, "v.json", "27d99b6"))
+    measured = serve.Measured(550, "v.json", "27d99b6", vllm_checked=True)
+    text = serve.budget(chosen, total_mib=8188, measured=measured)
     assert "measured headroom 550 MiB" in text and "v.json" in text and "27d99b6" in text
-    assert "computed, not measured" not in text
+    assert "computed, not measured" not in text and "vLLM version not checked" not in text
+
+
+def test_same_vllm_version_is_checked(tmp_path: Path) -> None:
+    write_vram(tmp_path, vllm="0.19.1")
+    found = lookup(tmp_path, vllm="0.19.1")
+    assert found is not None and found.vllm_checked is True
+
+
+def test_other_vllm_version_falls_back(tmp_path: Path) -> None:
+    write_vram(tmp_path, vllm="0.18.0")
+    assert lookup(tmp_path, vllm="0.19.1") is None
+
+
+def test_record_without_vllm_version_says_it_was_not_checked(tmp_path: Path) -> None:
+    # Cyril: records from before e899a69 still count, but the line must say what wasn't checked.
+    write_vram(tmp_path)
+    found = lookup(tmp_path)
+    assert found is not None and found.vllm_checked is False
+    chosen = serve.ServedUtil(0.61, 0.59, "x.json", False)
+    assert "vLLM version not checked" in serve.budget(chosen, total_mib=8188, measured=found)
 
 
 def test_published_served_record_matches_what_serve_runs() -> None:
@@ -274,6 +300,8 @@ def test_published_served_record_matches_what_serve_runs() -> None:
     path = serve.RECORDS / "vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json"
     record = json.loads(path.read_text())
     gpu = serve.Gpu(record["gpu"], record["total_mib"])  # CI has no GPU: take the record's own
-    found = serve.measured_headroom(REPO, FULL, chosen.util, records=serve.RECORDS, gpu=gpu)
+    found = serve.measured_headroom(
+        REPO, FULL, chosen.util, records=serve.RECORDS, gpu=gpu, vllm_version="0.19.1"
+    )
     assert found is not None
     assert found.source == "results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json"
