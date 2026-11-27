@@ -56,3 +56,28 @@ Interview gold. One entry per real problem. Be specific: symptoms, numbers, wron
   tree unless `--allow-dirty` (`f2b7300`).
 - **Lesson:** a gate that depends on how the command is typed is not a gate. Make the commit
   itself fail.
+
+## F-003 — Stale bytecode after a mutation check made a correct commit fail
+
+- **Date / milestone:** 2026-11-26, ADR-0003 follow-up (after M3.1)
+- **Symptom:** a docs-only commit was refused by the pre-commit gate:
+  `tests/test_serve.py::test_published_served_record_is_what_serve_would_use` failed with
+  `assert 0.61 == 0.62`. `agent/serve.py` on disk said `UTIL_MARGIN = 0.02`, but
+  `python -c "from agent import serve; print(serve.UTIL_MARGIN)"` printed `0.03`.
+- **Wrong hypotheses:** Claude first suspected the date rolling over to 2026-11-26 and went
+  looking for a test that depends on today's date. No such test was involved.
+- **Root cause:** Claude's mutation check in the previous PR changed `UTIL_MARGIN = 0.02` to
+  `0.03` with `sed -i`, ran the test, then restored the file with `git checkout`, all within one
+  second and with the same file size. Python accepts a cached `.pyc` when the source's mtime
+  (whole seconds) and size match the values stored in it, so it kept loading the mutant's
+  bytecode after the source was restored. The same mechanism could just as well make the gate
+  pass on broken source.
+- **Fix:** deleted the `__pycache__` folders under `agent/`, `bench/`, `clinic/` and `tests/`.
+  The same commit then passed (`92882a2`). No code changed; `main` was never wrong.
+- **Guard added:** none yet. Planned (Cyril, 2026-11-27), as the PR after the handover:
+  1. `make test` uses a fresh `PYTHONPYCACHEPREFIX` (a temp folder per run), so the gate never
+     reads bytecode from an earlier run.
+  2. A CLAUDE.md rule: mutation checks run with `PYTHONDONTWRITEBYTECODE=1` and clear
+     `__pycache__` after restoring.
+- **Lesson:** restoring a file's source isn't the same as restoring what Python runs. A
+  restore that keeps the mtime second and the size needs its bytecode cleared too.

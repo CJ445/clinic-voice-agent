@@ -5,6 +5,47 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ---
 
+## 2026-11-27 — session 2, end (M3.1 merged; ADR-0003 evidence complete)
+
+- **Milestone / task:** M3.1 done and merged (#14). M3.2 not started: it waits for ADR-0004,
+  which Cyril is writing. The previous entry (M3.1 on `m3/serve`) still holds for M3.1's
+  content and carries.
+- **Merged since that entry:**
+  - #15 `m1/adr-0003-served-util`: `make vram TOOLS=1` / `bench.vram --tools` starts vLLM as
+    `agent.serve` does. The record stores the launched argv (`llm.argv`) and derives
+    `tool_calling` from it. `results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json`
+    (`27d99b6`, clean): headroom 550 MiB, identical to the earlier run at `674fa44`.
+    `tests/test_serve.py` fails if the published served util stops matching `choose_util`.
+  - #16 `m1/adr-0003-option2`: ADR-0003 Option 2 lists both measured 3–4B candidates. For
+    Qwen3-4B, "reliably fits" is marked unverified: its 50 MiB margin over the floor is less
+    than the 94 MiB the 3B moved between runs.
+- **Open decisions (Cyril):**
+  - the ADR-0003 Decision (Options 1–3 all have evidence now);
+  - ADR-0004 (LangGraph scope), which blocks M3.2. Don't draft it.
+- **Next tasks for Claude, in this order (order set by Cyril, 2026-11-27; one PR each):**
+  1. F-003 guard:
+     - (a) `make test` uses a fresh `PYTHONPYCACHEPREFIX` (a temp folder per run); report the
+       `make check` time before and after.
+     - (b) a CLAUDE.md rule: mutation checks run with `PYTHONDONTWRITEBYTECODE=1` and clear
+       `__pycache__` after restoring.
+     - Then update F-003's "Guard added" with the commits.
+  2. `agent.serve` prints measured headroom only on an exact match: full SHA, util, served
+     flags (`tools=True`) and `dirty: false`. Anything else keeps "computed, not measured".
+     Tests: a mismatch in each field falls back.
+  3. Review nits from M3.1: drop the source-grep test (#7); add `venvPath`/`venv` to
+     `[tool.pyright]` (#9).
+  4. `bench/vram.py` names vLLM logs by model + commit hash, so evidence logs are never
+     overwritten. Test the naming.
+- **Still logged, not done:** the older 0.59 vram record has no `tool_calling` key (a missing
+  key means false).
+- **Failures this stretch:** F-003 (stale `.pyc` after a mutation check). See FAILURES.md.
+- **Gate at close:** `make check` on `main` at `1b85487`: exit 0; 416 passed, 1 deselected
+  (gpu), 1 xfailed (the strict M3.2 idempotency-key xfail).
+- **First command next session:** `git switch main && git pull --ff-only && make check`, then
+  start task 1 (the F-003 guard) on a new branch.
+
+---
+
 ## 2026-11-25 — session 2 (cont.), M3.1 on `m3/serve` (in review)
 
 - **Since M2:** #12 (dates follow-up) and #13 (Qwen3-4B measurements) merged. M3.1 is on
