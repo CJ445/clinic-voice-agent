@@ -93,8 +93,9 @@ larger measured inference peak (5,430 − 5,252 = +178 MiB, at `4c1d4cc`) as a s
        (derived); one short exchange, so the peak of a long call with a fuller KV cache is
        **unverified**.
      - KV cache (`results/vllm_Qwen3-4B-Instruct-2507-AWQ-4bit.log` from the `27d99b6` run;
-       **local only**, and the next `make vram` of this model overwrites it): 0.76 GiB, 5,552
-       tokens, 1.36x concurrency at max-model-len 4,096, so room for only one full-length call.
+       **local only**; `make vram` now names new logs by model and commit, so it is no longer
+       overwritten): 0.76 GiB, 5,552 tokens, 1.36x concurrency at max-model-len 4,096, so room
+       for only one full-length call.
        Weights 3.28 GiB. (The 1.36x also appears in the published `min_util` trial at 0.61.)
      - System RAM: peak 10,467 of 15,274 MiB.
      - Tool calling: `tests/test_llm_live.py` (gpu-marked, not run in CI) checks that vLLM's
@@ -152,7 +153,11 @@ TODO(Cyril)
 - `results/published/min_util_Qwen2.5-3B-Instruct-AWQ.json`, `results/published/min_util_Qwen2.5-7B-Instruct-AWQ.json`
   — commit `0a764e5`, clean tree, every trial.
 - vLLM logs `results/vllm_Qwen2.5-*-AWQ_u*.log` and `results/vllm_Qwen3-4B-Instruct-2507-AWQ-4bit*.log`
-  (gitignored; local only; named by model, so a later run of the same model overwrites them).
+  (gitignored; local only). `bench.vram` now names new logs by model, commit, utilization and
+  tool flags (plus `_dirty` for an `--allow-dirty` run), skips any name already taken, and
+  records the log's file name in each run's `llm.log`. Two `make vram` runs started at the same
+  moment could still pick the same name. `bench.min_util` still names its logs by model and
+  utilization, so a repeat search overwrites those.
 - Licences: model cards at the pinned revisions (`3559b226e8ce77211e2c1bd7ddfb7686fec4d6dd`,
   `b25037543e9394b818fdfca67ab2a00ecc7dd641`), checked 2026-11-25.
 - Qwen3-4B-Instruct-2507 AWQ (`cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit` at

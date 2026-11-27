@@ -7,6 +7,7 @@ that were never reached are None. Error messages must not carry the home directo
 
 import threading
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -140,7 +141,7 @@ def test_tool_calling_is_read_from_the_command_vllm_ran() -> None:
 
     for tools in (True, False):
         argv = vllm_server.server_command("some/model", "rev", 0.5, tools=tools)[1:]
-        record = llm_record("some/model", "rev", 0.5, argv)
+        record = llm_record("some/model", "rev", 0.5, argv, log="x.log")
         assert record["tool_calling"] is tools
         assert record["argv"] == argv
 
@@ -151,7 +152,7 @@ def test_argv_leaves_out_the_interpreter_path() -> None:
 
     argv = vllm_server.server_command("some/model", "rev", 0.5)[1:]
     assert argv[:2] == ["-m", "vllm.entrypoints.openai.api_server"]  # no home dir in the record
-    assert llm_record("some/model", "rev", 0.5, argv)["gpu_memory_utilization"] == 0.5
+    assert llm_record("some/model", "rev", 0.5, argv, log="x.log")["gpu_memory_utilization"] == 0.5
 
 
 def test_vllm_version_is_read_from_package_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,3 +175,51 @@ def test_vllm_version_is_none_when_vllm_is_not_installed(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(importlib.metadata, "version", missing)
     assert vram.vllm_version() is None
+
+
+# Cyril, 2026-11-27: evidence logs are named by model + commit and never overwritten.
+def test_log_name_has_model_commit_util_and_tool_flag(tmp_path: Path) -> None:
+    from bench.vram import log_path
+
+    log = log_path(
+        tmp_path, "cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit", "27d99b6", 0.61, True, False
+    )
+    assert log == tmp_path / "vllm_Qwen3-4B-Instruct-2507-AWQ-4bit_27d99b6_u0.61_tools.log"
+    plain = log_path(
+        tmp_path, "cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit", "27d99b6", 0.61, False, False
+    )
+    assert plain.name == "vllm_Qwen3-4B-Instruct-2507-AWQ-4bit_27d99b6_u0.61.log"
+
+
+def test_an_existing_log_is_never_overwritten(tmp_path: Path) -> None:
+    from bench.vram import log_path
+
+    first = log_path(tmp_path, "x/model", "abc1234", 0.5, False, False)
+    first.write_text("first run")
+    second = log_path(tmp_path, "x/model", "abc1234", 0.5, False, False)
+    assert second == tmp_path / "vllm_model_abc1234_u0.5-2.log"
+    second.write_text("second run")
+    assert (
+        log_path(tmp_path, "x/model", "abc1234", 0.5, False, False).name
+        == "vllm_model_abc1234_u0.5-3.log"
+    )
+    assert first.read_text() == "first run"
+
+
+def test_a_dirty_run_is_not_named_like_clean_evidence(tmp_path: Path) -> None:
+    # Review should-fix #2: an --allow-dirty run's code is not HEAD's, so its log must say so.
+    from bench.vram import log_path
+
+    assert log_path(tmp_path, "x/model", "abc1234", 0.5, True, True).name == (
+        "vllm_model_abc1234_u0.5_tools_dirty.log"
+    )
+
+
+def test_the_record_names_its_log(tmp_path: Path) -> None:
+    # Review should-fix #3: with -2/-3 suffixes, the record must say which log is its own.
+    from agent import vllm_server
+    from bench.vram import llm_record
+
+    argv = vllm_server.server_command("x/model", "rev", 0.5)[1:]
+    record = llm_record("x/model", "rev", 0.5, argv, log="vllm_model_abc1234_u0.5-2.log")
+    assert record["log"] == "vllm_model_abc1234_u0.5-2.log"
