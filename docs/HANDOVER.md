@@ -38,6 +38,9 @@ then checked by Cyril. The next session starts by reading the top entry.
      overwritten. Test the naming.
 - **Still logged, not done:** the older 0.59 vram record has no `tool_calling` key (a missing
   key means false).
+- **Carry into M4.1 (Cyril, 2026-11-27):** once the STT config lives in agent code, add it
+  (model, revision, beam, compute type) to `agent.serve.measured_headroom`'s match, and drop
+  "STT config not checked" from the printed line.
 - **Failures this stretch:** F-003 (stale `.pyc` after a mutation check). See FAILURES.md.
 - **Gate at close:** `make check` on `main` at `1b85487`: exit 0; 416 passed, 1 deselected
   (gpu), 1 xfailed (the strict M3.2 idempotency-key xfail).

@@ -12,6 +12,7 @@ completion, then serves until Ctrl-C or SIGTERM and stops vLLM's whole process g
 """
 
 import argparse
+import importlib.metadata
 import json
 import signal
 import subprocess
@@ -29,6 +30,9 @@ LOG = Path("results/vllm_serve.log")
 UTIL_MARGIN = 0.02
 # Policy (Cyril, review #8): the highest utilization the serve script accepts.
 MAX_UTIL = 0.95
+# PLAN M0.3 exit criterion: the least VRAM headroom a measured set may leave. bench.vram judges
+# "fits" against it, and measured_headroom re-checks old records against today's value.
+MIN_HEADROOM_MIB = 500
 # A recorded revision shorter than this is too ambiguous to match a full SHA by prefix.
 MIN_PREFIX = 10
 
@@ -75,19 +79,34 @@ def _in_range(chosen: ServedUtil) -> ServedUtil:
 
 
 @dataclass(frozen=True)
+class Gpu:
+    """The GPU agent.serve is about to run on, as nvidia-smi names it."""
+
+    name: str
+    total_mib: int
+
+
+@dataclass(frozen=True)
 class Measured:
     """Headroom measured by make vram for exactly the configuration being served."""
 
     headroom_mib: int
     source: str  # the record's path
     commit: str
+    vllm_checked: bool  # False: the record predates vllm_version, so it wasn't compared
 
 
-def measured_headroom(repo: str, revision: str, util: float, *, records: Path) -> Measured | None:
+def measured_headroom(
+    repo: str, revision: str, util: float, *, records: Path, gpu: Gpu, vllm_version: str | None
+) -> Measured | None:
     """The measured headroom for this exact served setup, or None (Cyril, 2026-11-27).
 
     A run matches only if its record is from a clean tree, the set fitted, and its llm.argv is
-    exactly the command agent.serve launches (same full SHA, utilization and tool-calling flags).
+    exactly the command agent.serve launches (same full SHA, utilization and tool-calling flags),
+    on a GPU with the same name and total memory, and with the installed vLLM version if the
+    record names one (older records don't; the printed line then says it wasn't checked).
+    The STT model, beam and compute type are not compared: they live in bench/vram.py, not agent
+    code, so the printed line says "STT config not checked" (into the match at M4.1).
     Records without llm.argv (before 27d99b6), a commit or a dirty flag never match; nor does
     results/published/vram.json (the glob needs vram_*). Several matches: the lowest headroom.
     """
@@ -98,11 +117,19 @@ def measured_headroom(repo: str, revision: str, util: float, *, records: Path) -
         # .get throughout: an older-shaped record falls back, it never stops serving (review #1).
         if record.get("dirty") is not False or not record.get("commit"):
             continue
+        if (record.get("gpu"), record.get("total_mib")) != (gpu.name, gpu.total_mib):
+            continue  # measured on another GPU (Cyril, 2026-11-27)
+        recorded_vllm = record.get("vllm_version")
+        if recorded_vllm is not None and recorded_vllm != vllm_version:
+            continue  # measured with another vLLM
         for run in record.get("runs", []):
             headroom = run.get("mib", {}).get("headroom")
             argv = run.get("llm", {}).get("argv")
-            if run.get("fits") is True and headroom is not None and argv == served:
-                found.append(Measured(headroom, str(path), record["commit"]))
+            if headroom is None or headroom < MIN_HEADROOM_MIB:
+                continue  # "fits" is recomputed against today's floor (Cyril, 2026-11-27)
+            if run.get("fits") is True and argv == served:
+                checked = recorded_vllm is not None
+                found.append(Measured(headroom, str(path), record["commit"], checked))
     return min(found, key=lambda m: m.headroom_mib, default=None)
 
 
@@ -118,7 +145,9 @@ def budget(chosen: ServedUtil, *, total_mib: int, measured: Measured | None = No
         return (
             f"gpu-memory-utilization {chosen.util}: {origin}\n"
             f"{share}; measured headroom {measured.headroom_mib} MiB with STT and TTS loaded "
-            f"({measured.source}, commit {measured.commit}; a sampled peak, so an upper bound)"
+            f"({measured.source}, commit {measured.commit}; a sampled peak, so an upper bound"
+            + ("" if measured.vllm_checked else "; vLLM version not checked")
+            + "; STT config not checked)"
         )
     return (
         f"gpu-memory-utilization {chosen.util}: {origin}\n"
@@ -128,10 +157,20 @@ def budget(chosen: ServedUtil, *, total_mib: int, measured: Measured | None = No
     )
 
 
-def total_mib() -> int:
-    """Total VRAM of GPU 0, from nvidia-smi."""
-    query = ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"]
-    return int(subprocess.run(query, check=True, capture_output=True, text=True).stdout.split()[0])
+def installed_vllm() -> str | None:
+    """The installed vLLM version, to compare with the one a measurement recorded."""
+    try:
+        return importlib.metadata.version("vllm")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def gpu_info() -> Gpu:
+    """Name and total VRAM of GPU 0, from nvidia-smi."""
+    query = ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]
+    first = subprocess.run(query, check=True, capture_output=True, text=True).stdout.splitlines()[0]
+    name, total = first.rsplit(",", 1)
+    return Gpu(name.strip(), int(total))
 
 
 def _sigterm_as_interrupt(signum: int, frame: FrameType | None) -> None:
@@ -156,8 +195,11 @@ def main() -> None:
     args = parser.parse_args()
     repo, _, revision = args.llm.partition("@")
     chosen = choose_util(repo, revision, override=args.util, records=RECORDS)
-    measured = measured_headroom(repo, revision, chosen.util, records=RECORDS)
-    print(budget(chosen, total_mib=total_mib(), measured=measured), flush=True)
+    gpu = gpu_info()
+    measured = measured_headroom(
+        repo, revision, chosen.util, records=RECORDS, gpu=gpu, vllm_version=installed_vllm()
+    )
+    print(budget(chosen, total_mib=gpu.total_mib, measured=measured), flush=True)
     proc = vllm_server.start(repo, revision, chosen.util, LOG, tools=True)
     signal.signal(signal.SIGTERM, _sigterm_as_interrupt)
     try:
