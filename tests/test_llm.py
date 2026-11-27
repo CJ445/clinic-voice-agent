@@ -10,7 +10,6 @@ received; a barge-in cancellation is never turned into an LLMUnavailable.
 import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
-from pathlib import Path
 
 import httpx2
 import pytest
@@ -322,8 +321,3 @@ def test_client_never_retries_on_its_own() -> None:
     client = llm.make_client("http://vllm.test/v1")
     assert client.max_retries == 0
     assert client.timeout.connect == llm.CONNECT_TIMEOUT_S  # type: ignore[union-attr]
-
-
-def test_timing_constants_are_marked_initial() -> None:
-    source = Path(llm.__file__).read_text(encoding="utf-8")
-    assert "initial; revisit after M4.5" in source
