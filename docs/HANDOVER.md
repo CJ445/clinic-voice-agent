@@ -41,6 +41,10 @@ then checked by Cyril. The next session starts by reading the top entry.
 - **Carry into M4.1 (Cyril, 2026-11-27):** once the STT config lives in agent code, add it
   (model, revision, beam, compute type) to `agent.serve.measured_headroom`'s match, and drop
   "STT config not checked" from the printed line.
+- **vLLM version check is not active yet (Cyril, 2026-11-27: no fresh `make vram` for it):**
+  the published served record predates `vllm_version`, so `agent.serve` prints "vLLM version
+  not checked". The next natural `make vram` run (an ADR-0002 STT change, or M4) records
+  `vllm_version`, and the check then becomes active.
 - **Failures this stretch:** F-003 (stale `.pyc` after a mutation check). See FAILURES.md.
 - **Gate at close:** `make check` on `main` at `1b85487`: exit 0; 416 passed, 1 deselected
   (gpu), 1 xfailed (the strict M3.2 idempotency-key xfail).
