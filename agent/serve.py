@@ -30,6 +30,9 @@ LOG = Path("results/vllm_serve.log")
 UTIL_MARGIN = 0.02
 # Policy (Cyril, review #8): the highest utilization the serve script accepts.
 MAX_UTIL = 0.95
+# PLAN M0.3 exit criterion: the least VRAM headroom a measured set may leave. bench.vram judges
+# "fits" against it, and measured_headroom re-checks old records against today's value.
+MIN_HEADROOM_MIB = 500
 # A recorded revision shorter than this is too ambiguous to match a full SHA by prefix.
 MIN_PREFIX = 10
 
@@ -122,7 +125,9 @@ def measured_headroom(
         for run in record.get("runs", []):
             headroom = run.get("mib", {}).get("headroom")
             argv = run.get("llm", {}).get("argv")
-            if run.get("fits") is True and headroom is not None and argv == served:
+            if headroom is None or headroom < MIN_HEADROOM_MIB:
+                continue  # "fits" is recomputed against today's floor (Cyril, 2026-11-27)
+            if run.get("fits") is True and argv == served:
                 checked = recorded_vllm is not None
                 found.append(Measured(headroom, str(path), record["commit"], checked))
     return min(found, key=lambda m: m.headroom_mib, default=None)

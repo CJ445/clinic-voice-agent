@@ -313,3 +313,19 @@ def test_measured_line_says_the_stt_config_was_not_checked() -> None:
     measured = serve.Measured(550, "v.json", "27d99b6", vllm_checked=True)
     chosen = serve.ServedUtil(0.61, 0.59, "x.json", False)
     assert "STT config not checked" in serve.budget(chosen, total_mib=8188, measured=measured)
+
+
+def test_raising_the_floor_makes_an_old_record_fall_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Cyril, 2026-11-27: a record's own "fits" used the floor of its day; recompute it now.
+    write_vram(tmp_path, headroom=550, fits=True)
+    assert lookup(tmp_path) is not None
+    monkeypatch.setattr(serve, "MIN_HEADROOM_MIB", 600)
+    assert lookup(tmp_path) is None
+
+
+def test_the_floor_is_defined_once() -> None:
+    from bench import gpu_mem
+
+    assert gpu_mem.MIN_HEADROOM_MIB is serve.MIN_HEADROOM_MIB

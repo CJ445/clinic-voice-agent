@@ -6,7 +6,8 @@ Pure functions only: callers run the commands and pass the text in, so CI can te
 
 from dataclasses import dataclass
 
-MIN_HEADROOM_MIB = 500  # PLAN M0.3 exit criterion
+from agent.serve import MIN_HEADROOM_MIB  # defined once; agent.serve re-checks old records
+
 NOT_AVAILABLE = "[N/A]"
 REQUIRED_KEYS = ("commit", "command", "gpu", "driver")  # Gate G4 provenance
 
