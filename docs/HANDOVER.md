@@ -5,6 +5,47 @@ then checked by Cyril. The next session starts by reading the top entry.
 
 ---
 
+## 2026-11-27 — session 3, end (M3.1 follow-ups done; M3.2 waits for ADR-0004)
+
+- **Milestone / task:** M3.1 follow-ups. M3.2 is not started: it waits for Cyril's ADR-0004.
+  This entry replaces the "Next tasks" list and the gate line of the entry below; that
+  entry's other items still hold.
+- **Merged since the entry below:** #18 (F-003 pycache guard and CLAUDE.md rule 11), #19
+  (measured headroom on an exact match), #20 (measured headroom also checks the GPU, the vLLM
+  version when recorded, and today's floor; `MIN_HEADROOM_MIB` moved to `agent/serve.py`),
+  #21 (HANDOVER note: the vLLM version check becomes active at the next natural `make vram`),
+  #22 (drops the source-grep test (#7), adds `venvPath`/`venv` to `[tool.pyright]` (#9), adds
+  the M4.5 timeout carry below).
+- **Open, waiting for Cyril:**
+  - #23 `bench/vram-log-names` (pushed, PR open): `f0aca2d` names vLLM logs
+    `vllm_<model>_<commit>_u<util>[_tools][_dirty].log` and never reuses a taken name;
+    `aa147a6` adds `_dirty` for `--allow-dirty` runs and records the log's file name in each
+    run's `llm.log`. ADR-0003's notes on logs are updated. One review pass done.
+- **Logged from reviews, not fixed (for Cyril):**
+  - #20: `agent.serve.gpu_info()` parses nvidia-smi output and has no unit test; if the parse
+    breaks, every lookup quietly falls back to "computed".
+  - #20: `agent.serve.installed_vllm()` and `bench.vram.vllm_version()` are the same function;
+    only the bench one is tested. If they drift, matches quietly stop.
+  - Item 3: two `make vram` runs started at the same moment can pick the same log name (the
+    name is checked, then opened with truncate). Fix would be exclusive open (`"xb"`).
+  - Item 3: no test that `main` actually passes the commit and dirty flag down to `log_path`.
+  - Item 3 nit: vram writes `u0.6`, min_util writes `u0.60` for the same setting.
+  - Older: the 0.59 vram record has no `tool_calling` key (a missing key means false).
+- **Carry into M4.1:** add the STT config to `measured_headroom`'s match (entry below).
+- **Carry into M4.5 (entry below, from #22):** revisit `agent/llm.py`'s timing constants and
+  `MAX_TOKENS`.
+- **Open decisions (Cyril):** the ADR-0003 Decision; ADR-0004 (blocks M3.2; don't draft it);
+  whether to fix any of the logged items above.
+- **Failures this stretch:** none new. F-003's guard is in (#18).
+- **Gate at close:** `make check` on `main` at `9aa55d2` (#22 merged, #23 not): exit 0;
+  445 passed, 1 deselected (gpu), 1 xfailed (the strict M3.2 idempotency-key xfail). On
+  `bench/vram-log-names` at `aa147a6`: exit 0; 450 passed.
+- **First command next session:** `git switch main && git pull --ff-only && make check`. Then
+  check that #23 is merged; with no ADR-0004 yet, ask Cyril which logged item (if any) to
+  take.
+
+---
+
 ## 2026-11-27 — session 2, end (M3.1 merged; ADR-0003 evidence complete)
 
 - **Milestone / task:** M3.1 done and merged (#14). M3.2 not started: it waits for ADR-0004,
