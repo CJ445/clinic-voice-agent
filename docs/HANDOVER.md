@@ -38,6 +38,9 @@ then checked by Cyril. The next session starts by reading the top entry.
      overwritten. Test the naming.
 - **Still logged, not done:** the older 0.59 vram record has no `tool_calling` key (a missing
   key means false).
+- **Carry into M4.5 (baseline latency):** revisit `agent/llm.py`'s timing constants
+  (`CONNECT_TIMEOUT_S`, `FIRST_TOKEN_TIMEOUT_S`, `INTER_CHUNK_TIMEOUT_S`, `TOTAL_TIMEOUT_S`) and
+  `MAX_TOKENS`, all marked "initial; revisit after M4.5", against the measured latencies.
 - **Carry into M4.1 (Cyril, 2026-11-27):** once the STT config lives in agent code, add it
   (model, revision, beam, compute type) to `agent.serve.measured_headroom`'s match, and drop
   "STT config not checked" from the printed line.

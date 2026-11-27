@@ -42,6 +42,10 @@ select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC", "DTZ"]  # DTZ: forbid naive 
 include = ["agent", "clinic", "sim", "bench", "ci", "tests"]
 typeCheckingMode = "standard"
 pythonVersion = "3.11"
+# Resolve imports from the project venv, so pyright run directly (or by an editor) sees the same
+# packages as `uv run pyright` in make check (M3.1 review nit #9).
+venvPath = "."
+venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
