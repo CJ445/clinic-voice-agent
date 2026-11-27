@@ -305,3 +305,11 @@ def test_published_served_record_matches_what_serve_runs() -> None:
     )
     assert found is not None
     assert found.source == "results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json"
+
+
+def test_measured_line_says_the_stt_config_was_not_checked() -> None:
+    # Cyril, 2026-11-27: the STT model, beam and compute type are not part of the match until
+    # the STT config lives in agent code (M4.1), so the line must say so.
+    measured = serve.Measured(550, "v.json", "27d99b6", vllm_checked=True)
+    chosen = serve.ServedUtil(0.61, 0.59, "x.json", False)
+    assert "STT config not checked" in serve.budget(chosen, total_mib=8188, measured=measured)

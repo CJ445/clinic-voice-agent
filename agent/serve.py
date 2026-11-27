@@ -102,6 +102,8 @@ def measured_headroom(
     exactly the command agent.serve launches (same full SHA, utilization and tool-calling flags),
     on a GPU with the same name and total memory, and with the installed vLLM version if the
     record names one (older records don't; the printed line then says it wasn't checked).
+    The STT model, beam and compute type are not compared: they live in bench/vram.py, not agent
+    code, so the printed line says "STT config not checked" (into the match at M4.1).
     Records without llm.argv (before 27d99b6), a commit or a dirty flag never match; nor does
     results/published/vram.json (the glob needs vram_*). Several matches: the lowest headroom.
     """
@@ -140,7 +142,7 @@ def budget(chosen: ServedUtil, *, total_mib: int, measured: Measured | None = No
             f"{share}; measured headroom {measured.headroom_mib} MiB with STT and TTS loaded "
             f"({measured.source}, commit {measured.commit}; a sampled peak, so an upper bound"
             + ("" if measured.vllm_checked else "; vLLM version not checked")
-            + ")"
+            + "; STT config not checked)"
         )
     return (
         f"gpu-memory-utilization {chosen.util}: {origin}\n"
