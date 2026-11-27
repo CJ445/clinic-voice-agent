@@ -10,7 +10,8 @@ The LLM (vLLM), STT and TTS must run together on one RTX 4060 Laptop GPU (8,188 
 at least 500 MiB headroom (PLAN M0.3). vLLM must start first because it pre-allocates memory.
 TTS (Indus Pocket TTS) runs on CPU and measured +0 MiB, so the real contest is LLM vs STT.
 
-All numbers below come from `results/published/vram.json`: commit `1c71cb2`, clean tree; the
+The numbers in this Context section come from `results/published/vram.json`: commit `1c71cb2`,
+clean tree (Option 2's Qwen3-4B figures cite their own records); the
 exact command (full revision SHAs) is in the file. The utilizations are each model's minimum
 from `bench.min_util` (lowest value where vLLM starts with ≥ 1x concurrency at max-model-len
 4096; `results/published/min_util_*.json`, commit `0a764e5`, clean). CUDA graphs on. STT is
@@ -70,15 +71,49 @@ larger measured inference peak (5,430 − 5,252 = +178 MiB, at `4c1d4cc`) as a s
    - Licence: Apache-2.0 (7B) + MIT (Whisper). Cost: about one `make vram` variant plus a CPU
      STT latency run.
 
-2. **A 3–4B LLM instead of the 7B (the Qwen 3B, or another model of that size).**
-   - VRAM: measured for the Qwen 3B: fits with 2,758 MiB headroom (conservative upper bound), leaving room for a larger
-     KV cache or a second STT pass.
-   - Quality: the Qwen 3B's one Hindi sample was unusable (see Context). Other 3–4B instruct
-     models with AWQ builds and Hindi ability are **unverified**: none has been tried here.
-   - Licence: the Qwen 3B is **non-commercial**. Fine for a portfolio/research build; blocks any
-     real clinic deployment. Another model's licence would need checking.
-   - Cost: for another model, a download (~2–3 GB), a `bench.min_util` search and a
-     `make vram` run; a fair Hindi comparison needs the M3/M5 eval, which doesn't exist yet.
+2. **A 3–4B LLM instead of the 7B.** Two candidates are measured.
+   - **Qwen2.5-3B-Instruct-AWQ @ 0.36:**
+     - VRAM: fits with 2,758 MiB headroom (conservative upper bound), leaving room for a
+       larger KV cache or a second STT pass.
+     - Quality: its one Hindi sample was unusable (see Context).
+     - Licence: **non-commercial**. Fine for a portfolio/research build; blocks any real clinic
+       deployment.
+   - **Qwen3-4B-Instruct-2507 AWQ** (`cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit`), as
+     `agent.serve` runs it: utilization 0.61 (its measured minimum 0.59 + `UTIL_MARGIN`), tool
+     calling on. Figures from `results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json`
+     (commit `27d99b6`, clean) unless noted:
+     - VRAM: 550 MiB headroom (upper bound; sampled peak), 50 MiB above the 500 MiB floor
+       (derived). GPU after vLLM 5,637 MiB; Whisper large-v3 +1,599; peak 7,638. Two runs of
+       this configuration gave identical readings (`674fa44`, in git history at `c4b83bc`, and
+       `27d99b6`). But the 3B set's peak moved 94 MiB between two runs (see Context), more than
+       this 50 MiB margin, so whether it **reliably fits is unverified**. At its minimum 0.59 without tool calling: 726 MiB headroom
+       (`vram_Qwen3-4B-Instruct-2507-AWQ-4bit.json`, commit `c9d35d8`).
+     - vLLM uses more than its setting: +5,626 MiB measured against ≈ 4,995 MiB by the setting
+       (0.61 × 8,188; derived). The round trip peaked 402 MiB above the after-TTS reading
+       (derived); one short exchange, so the peak of a long call with a fuller KV cache is
+       **unverified**.
+     - KV cache (`results/vllm_Qwen3-4B-Instruct-2507-AWQ-4bit.log` from the `27d99b6` run;
+       **local only**, and the next `make vram` of this model overwrites it): 0.76 GiB, 5,552
+       tokens, 1.36x concurrency at max-model-len 4,096, so room for only one full-length call.
+       Weights 3.28 GiB. (The 1.36x also appears in the published `min_util` trial at 0.61.)
+     - System RAM: peak 10,467 of 15,274 MiB.
+     - Tool calling: `tests/test_llm_live.py` (gpu-marked, not run in CI) checks that vLLM's
+       hermes parser turns its tool calls into a valid `check_slots` call. It passed on the
+       RTX 4060 on 2026-11-25 at `0b57f54` and `31902b8`; no results file records those runs.
+     - Quality: its one Hindi round trip came back in Devanagari and intelligible, but said the
+       appointment "will be recorded" (`रिकॉर्ड कराया जाएगा`) rather than booked. One sample at
+       temperature 0 with a throwaway prompt, not an evaluation: Hindi quality is
+       **unverified** until the M3/M5 evals.
+     - Licence: the quant's model card declares Apache-2.0, and the base model's LICENSE file
+       is Apache 2.0 (checked 2026-11-25). The quant repo ships no LICENSE file of its own.
+       Whether that is enough for a commercial deployment is for the Decision.
+     - Risks: the 50 MiB margin over the floor is thin; a vLLM or driver update, a longer
+       max-model-len or a larger STT beam could push it under, so each needs a new
+       `make vram`. The build is a third-party quantization (cyankiwi, llm-compressor; its
+       `recipe.yaml` says `W4A16_ASYM`), not an official Qwen release; its maturity is
+       **unverified**.
+   - Cost: both are already downloaded and measured. What remains is a fair Hindi comparison,
+     which needs the M3/M5 evals.
 
 3. **Keep the 7B and Whisper on GPU, shrink the footprint.** Levers, with what is known:
    - `--enforce-eager` (CUDA graphs off): vLLM estimates 0.61 GiB (≈ 625 MiB) of graph memory.
@@ -116,7 +151,8 @@ TODO(Cyril)
   The earlier run at `4c1d4cc` is in git history (`git show f5e252d:results/published/vram.json`).
 - `results/published/min_util_Qwen2.5-3B-Instruct-AWQ.json`, `results/published/min_util_Qwen2.5-7B-Instruct-AWQ.json`
   — commit `0a764e5`, clean tree, every trial.
-- vLLM logs `results/vllm_Qwen2.5-*-AWQ_u*.log` (gitignored; local only).
+- vLLM logs `results/vllm_Qwen2.5-*-AWQ_u*.log` and `results/vllm_Qwen3-4B-Instruct-2507-AWQ-4bit*.log`
+  (gitignored; local only; named by model, so a later run of the same model overwrites them).
 - Licences: model cards at the pinned revisions (`3559b226e8ce77211e2c1bd7ddfb7686fec4d6dd`,
   `b25037543e9394b818fdfca67ab2a00ecc7dd641`), checked 2026-11-25.
 - Qwen3-4B-Instruct-2507 AWQ (`cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit` at
