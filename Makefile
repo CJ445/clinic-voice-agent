@@ -18,8 +18,13 @@ types:
 
 # One pass: unit tests plus coverage: clinic/tools.py (M2 exit) and clinic/dates.py (Cyril,
 # M2 close-out) must stay 100% branch-covered.
+# F-003: the gate never runs a cached .pyc, which can be stale when a source file is restored at
+# the same mtime and size. Bytecode is looked up in a fresh, empty temp folder and never written,
+# so every run compiles from source; rmdir only removes the folder if it is still empty.
 test:
-	uv run pytest -q -m "not gpu" --cov=clinic.tools --cov=clinic.dates --cov-branch \
+	cache=$$(mktemp -d) && trap 'rmdir "$$cache"' EXIT && \
+	PYTHONPYCACHEPREFIX="$$cache" PYTHONDONTWRITEBYTECODE=1 uv run pytest -q -m "not gpu" \
+		--cov=clinic.tools --cov=clinic.dates --cov-branch \
 		--cov-report=term-missing:skip-covered --cov-fail-under=100
 
 # Gate G1 — must pass before every commit
