@@ -74,10 +74,13 @@ Interview gold. One entry per real problem. Be specific: symptoms, numbers, wron
   pass on broken source.
 - **Fix:** deleted the `__pycache__` folders under `agent/`, `bench/`, `clinic/` and `tests/`.
   The same commit then passed (`92882a2`). No code changed; `main` was never wrong.
-- **Guard added:** none yet. Planned (Cyril, 2026-11-27), as the PR after the handover:
-  1. `make test` uses a fresh `PYTHONPYCACHEPREFIX` (a temp folder per run), so the gate never
-     reads bytecode from an earlier run.
-  2. A CLAUDE.md rule: mutation checks run with `PYTHONDONTWRITEBYTECODE=1` and clear
-     `__pycache__` after restoring.
+- **Guard added** (Cyril's choice, 2026-11-27):
+  1. `5bcbf12`: `make test` points `PYTHONPYCACHEPREFIX` at a fresh, empty `mktemp -d` folder
+     and sets `PYTHONDONTWRITEBYTECODE=1`, so the gate compiles from source on every run and
+     writes nothing; `rmdir` removes the folder. Proved by recreating F-003 on purpose:
+     `make test` failed before the change and passes after; a failing test still exits 2.
+     Cost and before/after `make check` times are in that commit's body.
+  2. `0bc9a8b`: CLAUDE.md rule 11. Mutation checks run with `PYTHONDONTWRITEBYTECODE=1` and
+     delete the restored file's `.pyc`, so nothing else that imports it runs a stale mutant.
 - **Lesson:** restoring a file's source isn't the same as restoring what Python runs. A
   restore that keeps the mtime second and the size needs its bytecode cleared too.
