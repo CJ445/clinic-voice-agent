@@ -78,7 +78,8 @@ Interview gold. One entry per real problem. Be specific: symptoms, numbers, wron
   1. `5bcbf12`: `make test` points `PYTHONPYCACHEPREFIX` at a fresh, empty `mktemp -d` folder
      and sets `PYTHONDONTWRITEBYTECODE=1`, so the gate compiles from source on every run and
      writes nothing; `rmdir` removes the folder. Proved by recreating F-003 on purpose:
-     `make test` failed before the change and passes after; a failing test still exits 2.
+     `make test` failed before the change and passes after; with a failing test,
+     pytest exits 1 and `make test` exits 2.
      Cost and before/after `make check` times are in that commit's body.
   2. `0bc9a8b`: CLAUDE.md rule 11. Mutation checks run with `PYTHONDONTWRITEBYTECODE=1` and
      delete the restored file's `.pyc`, so nothing else that imports it runs a stale mutant.
