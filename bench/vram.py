@@ -192,7 +192,9 @@ def vllm_version() -> str | None:
         return None
 
 
-def llm_record(repo: str, revision: str, util: float, argv: list[str]) -> dict[str, object]:
+def llm_record(
+    repo: str, revision: str, util: float, argv: list[str], *, log: str
+) -> dict[str, object]:
     """The LLM part of a run record, from the command vLLM was actually started with."""
     return {
         "repo": repo,
@@ -202,13 +204,16 @@ def llm_record(repo: str, revision: str, util: float, argv: list[str]) -> dict[s
         "cuda_graphs": "--enforce-eager" not in argv,
         "tool_calling": "--enable-auto-tool-choice" in argv,  # --tools: as agent.serve starts it
         "argv": argv,
+        "log": log,  # file name only (no home path), so a -2/-3 log maps to its run
     }
 
 
-def log_path(log_dir: Path, repo: str, commit: str, util: float, tools: bool) -> Path:
+def log_path(log_dir: Path, repo: str, commit: str, util: float, tools: bool, dirty: bool) -> Path:
     """Where this run's vLLM log goes: named by model, commit, utilization and tool flags, and
-    never an existing file (Cyril, 2026-11-27), so ADR evidence logs are not overwritten."""
+    never an existing file (Cyril, 2026-11-27), so ADR evidence logs are not overwritten. A
+    dirty-tree run gets `_dirty`: its code is not that commit's (review #2)."""
     stem = f"vllm_{repo.split('/')[-1]}_{commit}_u{util}" + ("_tools" if tools else "")
+    stem += "_dirty" if dirty else ""
     path, n = log_dir / f"{stem}.log", 1
     while path.exists():
         n += 1
@@ -217,14 +222,14 @@ def log_path(log_dir: Path, repo: str, commit: str, util: float, tools: bool) ->
 
 
 def run_one(
-    llm: str, beam: int, total: int, log_dir: Path, tools: bool, commit: str
+    llm: str, beam: int, total: int, log_dir: Path, tools: bool, commit: str, dirty: bool
 ) -> dict[str, object]:
     repo, _, rest = llm.partition("@")
     revision, _, util = rest.partition(":")
     if parse_compute_apps(sh("nvidia-smi", APPS_QUERY, CSV)):
         raise RuntimeError("another compute process is using the GPU; stop it first")
     at = {"baseline": gpu_used_mib()}  # total GPU MiB used, read after each stage
-    log = log_path(log_dir, repo, commit, float(util), tools)
+    log = log_path(log_dir, repo, commit, float(util), tools, dirty)
     transcript, reply, reply_samples, error = "", "", 0, None
     proc = vllm_server.start(repo, revision, float(util), log, tools=tools)
     if not isinstance(proc.args, list):
@@ -254,7 +259,7 @@ def run_one(
     mib, ok = summarize(at, peak_gpu=peaks.gpu, total=total, error=error, sampler_error=peaks.error)
     error = combine_errors(error, peaks.error)
     return {
-        "llm": llm_record(repo, revision, float(util), argv),
+        "llm": llm_record(repo, revision, float(util), argv, log=log.name),
         "stt": {
             "repo": STT_REPO,
             "revision": STT_REVISION,
@@ -285,13 +290,13 @@ def run_one(
 
 
 def run_isolated(
-    llm: str, beam: int, total: int, log_dir: Path, tools: bool, commit: str
+    llm: str, beam: int, total: int, log_dir: Path, tools: bool, commit: str, dirty: bool
 ) -> dict[str, object]:
     """Run one model set in a fresh process, so its STT model and CUDA context are freed on exit
     and the next run starts from an idle GPU (the baseline check would otherwise see us)."""
     spawn = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=1, mp_context=spawn) as pool:
-        return pool.submit(run_one, llm, beam, total, log_dir, tools, commit).result()
+        return pool.submit(run_one, llm, beam, total, log_dir, tools, commit, dirty).result()
 
 
 def main() -> None:
@@ -303,13 +308,13 @@ def main() -> None:
     parser.add_argument("--tools", action="store_true", help="start vLLM as agent.serve does")
     args = parser.parse_args()
     start = provenance.provenance(allow_dirty=args.allow_dirty)  # before touching the GPU
-    commit = str(start["commit"])  # names the vLLM logs
+    commit, dirty = str(start["commit"]), bool(start["dirty"])  # name the vLLM logs
 
     import torch  # pyright: ignore[reportMissingImports]  # only for torch's CUDA build version
 
     gpu = parse_gpu_query(sh("nvidia-smi", GPU_QUERY, CSV))
     runs = [
-        run_isolated(llm, args.beam_size, gpu.total_mib, args.out.parent, args.tools, commit)
+        run_isolated(llm, args.beam_size, gpu.total_mib, args.out.parent, args.tools, commit, dirty)
         for llm in args.llm
     ]
     record = {

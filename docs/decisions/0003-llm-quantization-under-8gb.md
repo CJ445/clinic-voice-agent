@@ -154,7 +154,9 @@ TODO(Cyril)
   — commit `0a764e5`, clean tree, every trial.
 - vLLM logs `results/vllm_Qwen2.5-*-AWQ_u*.log` and `results/vllm_Qwen3-4B-Instruct-2507-AWQ-4bit*.log`
   (gitignored; local only). `bench.vram` now names new logs by model, commit, utilization and
-  tool flags and never overwrites one; `bench.min_util` still names its logs by model and
+  tool flags (plus `_dirty` for an `--allow-dirty` run), skips any name already taken, and
+  records the log's file name in each run's `llm.log`. Two `make vram` runs started at the same
+  moment could still pick the same name. `bench.min_util` still names its logs by model and
   utilization, so a repeat search overwrites those.
 - Licences: model cards at the pinned revisions (`3559b226e8ce77211e2c1bd7ddfb7686fec4d6dd`,
   `b25037543e9394b818fdfca67ab2a00ecc7dd641`), checked 2026-11-25.
