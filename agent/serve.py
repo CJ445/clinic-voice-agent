@@ -74,18 +74,54 @@ def _in_range(chosen: ServedUtil) -> ServedUtil:
     return chosen
 
 
-def budget(chosen: ServedUtil, *, total_mib: int) -> str:
-    """Say what share of VRAM vLLM gets and the most that can be left for STT/TTS and headroom."""
+@dataclass(frozen=True)
+class Measured:
+    """A make vram headroom for exactly the configuration being served."""
+
+    headroom_mib: int
+    source: str  # the record's path
+    commit: str
+
+
+def measured_headroom(repo: str, revision: str, util: float, *, records: Path) -> Measured | None:
+    """The measured headroom for this exact served setup, or None (Cyril, 2026-11-27).
+
+    A run matches only if its record is from a clean tree, the set fitted, and its llm.argv is
+    exactly the command agent.serve launches (same full SHA, utilization and tool-calling flags).
+    Records without llm.argv (before 27d99b6) never match. Several matches: the lowest headroom.
+    """
+    served = vllm_server.server_command(repo, revision, util, tools=True)[1:]
+    found = []
+    for path in sorted(records.glob("vram_*.json")):
+        record = json.loads(path.read_text())
+        if record["dirty"] is not False:
+            continue
+        for run in record["runs"]:
+            headroom = run["mib"]["headroom"]
+            if run["fits"] and headroom is not None and run["llm"].get("argv") == served:
+                found.append(Measured(headroom, str(path), record["commit"]))
+    return min(found, key=lambda m: m.headroom_mib, default=None)
+
+
+def budget(chosen: ServedUtil, *, total_mib: int, measured: Measured | None = None) -> str:
+    """Say what share of VRAM vLLM gets and what is left for STT/TTS and headroom."""
     reserved = round(chosen.util * total_mib)
     if chosen.override:
         origin = "--util override"
     else:
         origin = f"measured {chosen.measured} + margin {UTIL_MARGIN} ({chosen.source})"
+    share = f"vLLM's share is {reserved} MiB of {total_mib} MiB"
+    if measured is not None:
+        return (
+            f"gpu-memory-utilization {chosen.util}: {origin}\n"
+            f"{share}; measured headroom {measured.headroom_mib} MiB with STT and TTS loaded "
+            f"({measured.source}, commit {measured.commit}; a sampled peak, so an upper bound)"
+        )
     return (
         f"gpu-memory-utilization {chosen.util}: {origin}\n"
-        f"vLLM's share is {reserved} MiB of {total_mib} MiB, so at most {total_mib - reserved} MiB "
-        "left for STT, TTS and headroom (computed, not measured: the vLLM process also uses memory "
-        "outside its share, so the real remainder is smaller; make vram measures it)"
+        f"{share}, so at most {total_mib - reserved} MiB left for STT, TTS and headroom "
+        "(computed, not measured: the vLLM process also uses memory outside its share, so the "
+        "real remainder is smaller; make vram measures it)"
     )
 
 
@@ -117,7 +153,8 @@ def main() -> None:
     args = parser.parse_args()
     repo, _, revision = args.llm.partition("@")
     chosen = choose_util(repo, revision, override=args.util, records=RECORDS)
-    print(budget(chosen, total_mib=total_mib()), flush=True)
+    measured = measured_headroom(repo, revision, chosen.util, records=RECORDS)
+    print(budget(chosen, total_mib=total_mib(), measured=measured), flush=True)
     proc = vllm_server.start(repo, revision, chosen.util, LOG, tools=True)
     signal.signal(signal.SIGTERM, _sigterm_as_interrupt)
     try:

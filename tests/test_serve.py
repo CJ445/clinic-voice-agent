@@ -156,3 +156,83 @@ def test_published_served_record_is_what_serve_would_use() -> None:
     assert llm_run["gpu_memory_utilization"] == chosen.util
     assert llm_run["tool_calling"] is True
     assert "--tool-call-parser" in llm_run["argv"]
+
+
+# --- measured headroom (Cyril, 2026-11-27): only on an exact match, else "computed" -------------
+
+
+def write_vram(
+    folder: Path,
+    name: str = "served",
+    *,
+    repo: str = REPO,
+    revision: str = FULL,
+    util: float = 0.61,
+    tools: bool = True,
+    dirty: bool = False,
+    headroom: int | None = 550,
+    fits: bool = True,
+    commit: str = "27d99b6",
+) -> Path:
+    from agent import vllm_server
+
+    argv = vllm_server.server_command(repo, revision, util, tools=tools)[1:]
+    llm_run = {"repo": repo, "revision": revision, "gpu_memory_utilization": util, "argv": argv}
+    run = {"llm": llm_run, "mib": {"headroom": headroom}, "fits": fits}
+    path = folder / f"vram_{name}.json"
+    path.write_text(json.dumps({"commit": commit, "dirty": dirty, "runs": [run]}))
+    return path
+
+
+def test_exact_match_gives_the_measured_headroom(tmp_path: Path) -> None:
+    path = write_vram(tmp_path)
+    assert serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path) == serve.Measured(
+        550, str(path), "27d99b6"
+    )
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        {"revision": "c" * 40},  # another commit of the model
+        {"repo": "Qwen/Qwen2.5-3B-Instruct-AWQ"},
+        {"util": 0.59},  # measured at another utilization
+        {"tools": False},  # measured without the served tool-calling flags
+        {"dirty": True},  # measured on a dirty tree
+        {"headroom": None, "fits": False},  # a stage failed, so there is no headroom
+        {"headroom": 300, "fits": False},  # measured, but under the 500 MiB floor
+    ],
+)
+def test_any_mismatch_falls_back_to_computed(tmp_path: Path, mismatch: dict[str, object]) -> None:
+    write_vram(tmp_path, **mismatch)  # type: ignore[arg-type]
+    assert serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path) is None
+
+
+def test_a_record_without_argv_falls_back(tmp_path: Path) -> None:
+    # Records before 27d99b6 don't say what vLLM was launched with, so they can't match.
+    path = write_vram(tmp_path)
+    record = json.loads(path.read_text())
+    del record["runs"][0]["llm"]["argv"]
+    path.write_text(json.dumps(record))
+    assert serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path) is None
+
+
+def test_two_matches_use_the_lower_headroom(tmp_path: Path) -> None:
+    write_vram(tmp_path, "a", headroom=550)
+    low = write_vram(tmp_path, "b", headroom=520, commit="abc1234")
+    found = serve.measured_headroom(REPO, FULL, 0.61, records=tmp_path)
+    assert found == serve.Measured(520, str(low), "abc1234")
+
+
+def test_budget_prints_measured_headroom_when_given() -> None:
+    chosen = serve.ServedUtil(0.61, 0.59, "x.json", False)
+    text = serve.budget(chosen, total_mib=8188, measured=serve.Measured(550, "v.json", "27d99b6"))
+    assert "measured headroom 550 MiB" in text and "v.json" in text and "27d99b6" in text
+    assert "computed, not measured" not in text
+
+
+def test_published_served_record_matches_what_serve_runs() -> None:
+    chosen = serve.choose_util(REPO, FULL, override=None, records=serve.RECORDS)
+    found = serve.measured_headroom(REPO, FULL, chosen.util, records=serve.RECORDS)
+    assert found is not None
+    assert found.source == "results/published/vram_served_Qwen3-4B-Instruct-2507-AWQ-4bit.json"
