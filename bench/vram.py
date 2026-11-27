@@ -15,6 +15,7 @@ GPU-only imports live inside functions: CI does not install the gpu dependency g
 
 import argparse
 import datetime as dt
+import importlib.metadata
 import json
 import multiprocessing
 import subprocess
@@ -183,6 +184,14 @@ def to_16k(audio: Any) -> Any:
     return np.interp(positions, np.arange(len(audio)), audio).astype(np.float32)
 
 
+def vllm_version() -> str | None:
+    """The installed vLLM version, recorded so agent.serve can tell a stale measurement."""
+    try:
+        return importlib.metadata.version("vllm")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
 def llm_record(repo: str, revision: str, util: float, argv: list[str]) -> dict[str, object]:
     """The LLM part of a run record, from the command vLLM was actually started with."""
     return {
@@ -294,6 +303,7 @@ def main() -> None:
         "gpu": gpu.name,
         "driver": gpu.driver,
         "torch_cuda": torch.version.cuda,
+        "vllm_version": vllm_version(),
         "total_mib": gpu.total_mib,
         "ram_total_mib": ram_mib()[0],
         "min_headroom_mib": MIN_HEADROOM_MIB,

@@ -8,6 +8,8 @@ that were never reached are None. Error messages must not carry the home directo
 import threading
 from collections.abc import Callable
 
+import pytest
+
 from bench.vram import Peaks, combine_errors, describe_error, summarize
 
 TOTAL = 8188
@@ -150,3 +152,25 @@ def test_argv_leaves_out_the_interpreter_path() -> None:
     argv = vllm_server.server_command("some/model", "rev", 0.5)[1:]
     assert argv[:2] == ["-m", "vllm.entrypoints.openai.api_server"]  # no home dir in the record
     assert llm_record("some/model", "rev", 0.5, argv)["gpu_memory_utilization"] == 0.5
+
+
+def test_vllm_version_is_read_from_package_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Cyril, 2026-11-27: records carry the vLLM version so agent.serve can check it.
+    import importlib.metadata
+
+    from bench import vram
+
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: {"vllm": "0.19.1"}[name])
+    assert vram.vllm_version() == "0.19.1"
+
+
+def test_vllm_version_is_none_when_vllm_is_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.metadata
+
+    from bench import vram
+
+    def missing(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+    assert vram.vllm_version() is None
