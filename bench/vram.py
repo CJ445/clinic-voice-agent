@@ -205,13 +205,26 @@ def llm_record(repo: str, revision: str, util: float, argv: list[str]) -> dict[s
     }
 
 
-def run_one(llm: str, beam: int, total: int, log_dir: Path, tools: bool) -> dict[str, object]:
+def log_path(log_dir: Path, repo: str, commit: str, util: float, tools: bool) -> Path:
+    """Where this run's vLLM log goes: named by model, commit, utilization and tool flags, and
+    never an existing file (Cyril, 2026-11-27), so ADR evidence logs are not overwritten."""
+    stem = f"vllm_{repo.split('/')[-1]}_{commit}_u{util}" + ("_tools" if tools else "")
+    path, n = log_dir / f"{stem}.log", 1
+    while path.exists():
+        n += 1
+        path = log_dir / f"{stem}-{n}.log"
+    return path
+
+
+def run_one(
+    llm: str, beam: int, total: int, log_dir: Path, tools: bool, commit: str
+) -> dict[str, object]:
     repo, _, rest = llm.partition("@")
     revision, _, util = rest.partition(":")
     if parse_compute_apps(sh("nvidia-smi", APPS_QUERY, CSV)):
         raise RuntimeError("another compute process is using the GPU; stop it first")
     at = {"baseline": gpu_used_mib()}  # total GPU MiB used, read after each stage
-    log = log_dir / f"vllm_{repo.split('/')[-1]}.log"
+    log = log_path(log_dir, repo, commit, float(util), tools)
     transcript, reply, reply_samples, error = "", "", 0, None
     proc = vllm_server.start(repo, revision, float(util), log, tools=tools)
     if not isinstance(proc.args, list):
@@ -271,12 +284,14 @@ def run_one(llm: str, beam: int, total: int, log_dir: Path, tools: bool) -> dict
     }
 
 
-def run_isolated(llm: str, beam: int, total: int, log_dir: Path, tools: bool) -> dict[str, object]:
+def run_isolated(
+    llm: str, beam: int, total: int, log_dir: Path, tools: bool, commit: str
+) -> dict[str, object]:
     """Run one model set in a fresh process, so its STT model and CUDA context are freed on exit
     and the next run starts from an idle GPU (the baseline check would otherwise see us)."""
     spawn = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=1, mp_context=spawn) as pool:
-        return pool.submit(run_one, llm, beam, total, log_dir, tools).result()
+        return pool.submit(run_one, llm, beam, total, log_dir, tools, commit).result()
 
 
 def main() -> None:
@@ -288,12 +303,13 @@ def main() -> None:
     parser.add_argument("--tools", action="store_true", help="start vLLM as agent.serve does")
     args = parser.parse_args()
     start = provenance.provenance(allow_dirty=args.allow_dirty)  # before touching the GPU
+    commit = str(start["commit"])  # names the vLLM logs
 
     import torch  # pyright: ignore[reportMissingImports]  # only for torch's CUDA build version
 
     gpu = parse_gpu_query(sh("nvidia-smi", GPU_QUERY, CSV))
     runs = [
-        run_isolated(llm, args.beam_size, gpu.total_mib, args.out.parent, args.tools)
+        run_isolated(llm, args.beam_size, gpu.total_mib, args.out.parent, args.tools, commit)
         for llm in args.llm
     ]
     record = {

@@ -7,6 +7,7 @@ that were never reached are None. Error messages must not carry the home directo
 
 import threading
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -174,3 +175,27 @@ def test_vllm_version_is_none_when_vllm_is_not_installed(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(importlib.metadata, "version", missing)
     assert vram.vllm_version() is None
+
+
+# Cyril, 2026-11-27: evidence logs are named by model + commit and never overwritten.
+def test_log_name_has_model_commit_util_and_tool_flag(tmp_path: Path) -> None:
+    from bench.vram import log_path
+
+    log = log_path(tmp_path, "cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit", "27d99b6", 0.61, True)
+    assert log == tmp_path / "vllm_Qwen3-4B-Instruct-2507-AWQ-4bit_27d99b6_u0.61_tools.log"
+    plain = log_path(tmp_path, "cyankiwi/Qwen3-4B-Instruct-2507-AWQ-4bit", "27d99b6", 0.61, False)
+    assert plain.name == "vllm_Qwen3-4B-Instruct-2507-AWQ-4bit_27d99b6_u0.61.log"
+
+
+def test_an_existing_log_is_never_overwritten(tmp_path: Path) -> None:
+    from bench.vram import log_path
+
+    first = log_path(tmp_path, "x/model", "abc1234", 0.5, False)
+    first.write_text("first run")
+    second = log_path(tmp_path, "x/model", "abc1234", 0.5, False)
+    assert second == tmp_path / "vllm_model_abc1234_u0.5-2.log"
+    second.write_text("second run")
+    assert (
+        log_path(tmp_path, "x/model", "abc1234", 0.5, False).name == "vllm_model_abc1234_u0.5-3.log"
+    )
+    assert first.read_text() == "first run"
